@@ -177,6 +177,17 @@ func (pcb *PostConstructBean2) PostConstruct() error {
 }
 ```
 
+
+### Beans injection
+
+As was mentioned above, one bean can be injected into another with the `PostConstruct` method. But the more handy way of doing it is by using a special tag:
+
+```go
+	type SingletonBean struct {
+		SomeOtherBean string `di.inject:"someOtherBean"`
+	}
+```
+
 ### Circular dependencies
 
 The problem with all IoC containers is that beans' interconnection may suffer from so-called circular dependencies. Consider this example:
