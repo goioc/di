@@ -185,7 +185,7 @@ func injectSingletonDependencies() error {
 		if _, ok := beanFactories[beanID]; ok {
 			continue
 		}
-		err := injectDependencies(beanID, instance, make(map[string]bool, 0))
+		err := injectDependencies(beanID, instance, make(map[string]bool))
 		if err != nil {
 			return err
 		}
@@ -324,7 +324,7 @@ func GetInstance(beanID string) interface{} {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		panic("container is not initialized: can't lookup instances of beans yet")
 	}
-	instance, err := getInstance(beanID, make(map[string]bool, 0))
+	instance, err := getInstance(beanID, make(map[string]bool))
 	if err != nil {
 		panic(err)
 	}
@@ -335,7 +335,7 @@ func GetInstanceSafe(beanID string) (interface{}, error) {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		return nil, errors.New("container is not initialized: can't lookup instances of beans yet")
 	}
-	return getInstance(beanID, make(map[string]bool, 0))
+	return getInstance(beanID, make(map[string]bool))
 }
 
 func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
