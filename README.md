@@ -131,19 +131,19 @@ di.RegisterBean("beanID", reflect.TypeOf((*YourAwesomeStructure)(nil)))
 
 - **Using pre-created instance**. What if you already have an instance that you want to register as a bean? You can do it like this:
 ```go
-RegisterBeanInstance("beanID", yourAwesomeInstance)
+di.RegisterBeanInstance("beanID", yourAwesomeInstance)
 ```
 For this type of beans, the only supported scope is `Singleton`, because I don't dare to clone your instances to enable prototyping 😅
 
 - **Via bean factory**. If you have a method that is producing instances for you, you can register it as a bean factory:
 ```go
-RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
+di.RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
 		return "My awesome string that is go to become a bean!", nil
 	})
 ```
 Feel free to use any scope with this method. By the way, you can even lookup other beans within the factory:
 ```go
-RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
+di.RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
 		return di.GetInstance("someOtherBeanID"), nil
 	})
 ```
@@ -168,7 +168,7 @@ type PostConstructBean2 struct {
 }
 
 func (pcb *PostConstructBean2) PostConstruct() error {
-	instance, err := GetInstanceSafe("postConstructBean1")
+	instance, err := di.GetInstanceSafe("postConstructBean1")
 	if err != nil {
 		return err
 	}
