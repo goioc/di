@@ -33,14 +33,19 @@ var scopes = make(map[string]Scope)
 var singletonInstances = make(map[string]interface{})
 var userCreatedInstances = make(map[string]bool)
 
+// Scope is a enum for bean scopes supported in this IoC container.
 type Scope string
 
 const (
+	// Singleton is a scope of bean that exists only in one copy in the container and is created at the init-time.
 	Singleton Scope = "singleton"
+	// Prototype is a scope of bean that can exist in multiple copies in the container and is created on demand.
 	Prototype Scope = "prototype"
 )
 
+// InitializingBean is an interface marking beans that need to be additionally initialized after the container is ready.
 type InitializingBean interface {
+	// PostConstruct method will be called on a bean after the container is initialized.
 	PostConstruct() error
 }
 
@@ -48,6 +53,7 @@ func init() {
 	logrus.SetFormatter(&logrus.TextFormatter{})
 }
 
+// InitializeContainer function initializes the IoC container.
 func InitializeContainer() error {
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
@@ -70,6 +76,10 @@ func InitializeContainer() error {
 	return nil
 }
 
+// RegisterBean function registers bean by type, the scope of the bean should be defined in the corresponding struct
+// using a tag `di.scope` (`Singleton` is used if no scope is explicitly specified). `beanType` should be a reference
+// type, e.g.: `reflect.TypeOf((*services.YourService)(nil))`. Return value of `overwritten` is set to `true` if the
+// bean with the same `beanID` has been registered already.
 func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err error) {
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
@@ -107,6 +117,9 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 	return ok, nil
 }
 
+// RegisterBeanInstance function registers bean, provided the pre-created instance of this bean, the scope of such beans
+// are always `Singleton`. `beanInstance` can only be a reference or an interface. Return value of `overwritten` is set
+// to `true` if the bean with the same `beanID` has been registered already.
 func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten bool, err error) {
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
@@ -133,6 +146,10 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 	return ok, nil
 }
 
+// RegisterBeanFactory function registers bean, provided the bean factory that will be used by the container in order to
+// create an instance of this bean. `beanScope` can be any scope of the supported ones. `beanFactory` can only produce a
+// reference or an interface. Return value of `overwritten` is set to `true` if the bean with the same `beanID` has been
+// registered already.
 func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (interface{}, error)) (overwritten bool, err error) {
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
@@ -320,6 +337,8 @@ func initializeInstance(beanID string, instance interface{}) error {
 	return nil
 }
 
+// GetInstance function returns bean instance by its ID. It may panic, so if receiving the error in return is preferred,
+// consider using `GetInstanceSafe`.
 func GetInstance(beanID string) interface{} {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		panic("container is not initialized: can't lookup instances of beans yet")
@@ -331,6 +350,8 @@ func GetInstance(beanID string) interface{} {
 	return instance
 }
 
+// GetInstanceSafe function returns bean instance by its ID. It doesnt panic upon explicit error, but returns the error
+// instead.
 func GetInstanceSafe(beanID string) (interface{}, error) {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		return nil, errors.New("container is not initialized: can't lookup instances of beans yet")
