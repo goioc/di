@@ -133,7 +133,7 @@ di.RegisterBean("beanID", reflect.TypeOf((*YourAwesomeStructure)(nil)))
 ```go
 RegisterBeanInstance("beanID", yourAwesomeInstance)
 ```
-For this type of beans, the only supported scope is `Singleton`, because I don't dare copy your instances to enable prototyping 😅
+For this type of beans, the only supported scope is `Singleton`, because I don't dare to clone your instances to enable prototyping 😅
 
 - **Via bean factory**. If you have a method that is producing instances for you, you can register it as a bean factory:
 ```go
@@ -141,4 +141,51 @@ RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
 		return "My awesome string that is go to become a bean!", nil
 	})
 ```
-Feel free to use any scope with this method.
+Feel free to use any scope with this method. By the way, you can even lookup other beans within the factory:
+```go
+RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
+		return di.GetInstance("someOtherBeanID"), nil
+	})
+```
+
+### Beans initialization
+
+There's a special interface `InitializingBean` that can be implemented to provide your bean with some initialization logic that will we executed after the container is initialized (for `Singleton` beans) or after the `Prototype` instance is created. Again, you can also lookup other beans during initialization (since the container is ready by that time):
+
+```go
+type PostConstructBean1 struct {
+	Value string
+}
+
+func (pcb *PostConstructBean1) PostConstruct() error {
+	pcb.Value = "some content"
+	return nil
+}
+
+type PostConstructBean2 struct {
+	Scope              Scope `di.scope:"prototype"`
+	PostConstructBean1 *PostConstructBean1
+}
+
+func (pcb *PostConstructBean2) PostConstruct() error {
+	instance, err := GetInstanceSafe("postConstructBean1")
+	if err != nil {
+		return err
+	}
+	pcb.PostConstructBean1 = instance.(*PostConstructBean1)
+	return nil
+}
+```
+
+### Circular dependencies
+
+The problem with all IoC containers is that beans' interconnection may suffer from so-called circular dependencies. Consider this example:
+
+```go
+type CircularBean struct {
+	Scope        Scope         `di.scope:"prototype"`
+	CircularBean *CircularBean `di.inject:"circularBean"`
+}
+```
+
+Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸
