@@ -10,10 +10,10 @@
 [![DeepSource](https://static.deepsource.io/deepsource-badge-light-mini.svg)](https://deepsource.io/gh/goioc/di/?ref=repository-badge)
 
 ## Why DI in Go? Why IoC at all?
-I've been using Depencency Injection in Java for nearly 10 years via [Spring Framework](https://spring.io/). I'm not saying that one can't live without it, but it's proven to be very useful for large enterprise-level applications. You may argue that Go follows completely different principles and paradigms than Java and DI is not needed in this better world. And I can even partly agree with that. And yet I decided to create this light-weight Spring-like library for Go. You are free to not use it, after all :)
+I've been using Depencency Injection in Java for nearly 10 years via [Spring Framework](https://spring.io/). I'm not saying that one can't live without it, but it's proven to be very useful for large enterprise-level applications. You may argue that Go follows completely different ideology, values different principles and paradigms than Java, and DI is not needed in this better world. And I can even partly agree with that. And yet I decided to create this light-weight Spring-like library for Go. You are free to not use it, after all 🙂
 
 ## Is it the only DI library for Go?
-No, of course not. There's a bunch of libraries around which serve similar purpose (I even took inspiration from some of them). The problem is that I was missing something in all of these libraries... Therefore I decided to create Yet Another IoC Container that would rule them all. You are more than welccome to use any other library, for example [this nice project](https://github.com/sarulabs/di). And still, I'd recommend to stop by here :) 
+No, of course not. There's a bunch of libraries around which serve similar purpose (I even took inspiration from some of them). The problem is that I was missing something in all of these libraries... Therefore I decided to create Yet Another IoC Container that would rule them all. You are more than welccome to use any other library, for example [this nice project](https://github.com/sarulabs/di). And still, I'd recommend to stop by here 🙂
 
 ## So, how does it work? 
 It's better to show than to describe. Take a look at this toy-example (error-handling is omitted to minimize code snippets):
