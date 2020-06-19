@@ -199,4 +199,12 @@ type CircularBean struct {
 }
 ```
 
-Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸
+Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸 
+
+## Okaaay... More examples?
+
+Please, take a look at the [unit-tests](https://github.com/goioc/di/blob/master/di_test.go) for more examples.
+
+## Is there something more coming?
+
+Yes, definitely. The next thing to be implemented is a new scope: `Request`. This scope is, again, [inspired](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/context/request/RequestScope.html) by the Spring Framework: its life-cycle is bound to the HTTP request that is being processed. This scope is very useful for web-applications, but it's not essential for the IoC itself, so the development is slightly postponed (also, you can mimic `Request` scope even now with the combination of `Prototype` beans and/or bean factories). But stay tuned! 🤩
