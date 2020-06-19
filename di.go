@@ -26,7 +26,7 @@ import (
 
 var initializeLock sync.Mutex
 var createInstanceLock sync.Mutex
-var containerInitialized int32 = 0
+var containerInitialized int32
 var beans = make(map[string]reflect.Type)
 var beanFactories = make(map[string]func() (interface{}, error))
 var scopes = make(map[string]Scope)
