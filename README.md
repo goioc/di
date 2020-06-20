@@ -44,7 +44,6 @@ func (ws *WeatherService) Weather(city string) (*string, error) {
 }
 ```
 
-
 **controllers/weather_controller.go**
 ```go
 package controllers
@@ -113,7 +112,12 @@ The main component of the library is the [Inversion of Control Container](https:
 ### Types of beans
 
 - **Singleton**. Exists only in one copy in the container. Every time you retrieve the instance from the container (or every time it's being injected to another bean) - it will be the same instance.
-- **Prototype**. It can exist in multiple copies: new copy is created upon retrieval from the container (or upon injection into another bean).
+- **Prototype**. It can exist in multiple copies: a new copy is created upon retrieval from the container (or upon injection into another bean).
+- **Request**. Similar to `Prototype`, however it has a few differences and features (since its lifecycle is bound to a web request):
+   - Can't be injected to other beans.
+   - Can't be manually retrieved from the Container.
+   - `Prototype` beans are automatically injected to the `context.Context` of a corresponding `http.Request`. 
+   - If a `Prototype` bean implements `io.Closer`, it will be "closed" upon corresponding request's cancellation.
 
 ### Beans registration
 
@@ -196,10 +200,128 @@ type CircularBean struct {
 
 Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸 
 
+## What about middleware?
+
+We have some 😄 Here's an example with [gorilla/mux](https://github.com/gorilla/mux) router (but feel free to use any other router). 
+Basically, it's an extension of the very first example with the weather controller, but this time we add `Request` beans and access them via request's context. 
+Also, this example demonstrates how DI can automatically close resources for you (DB connection in this case). The proper error handling is, again, omitted for simplicity.
+
+**controllers/weather_controller.go**
+```go
+package controllers
+
+import (
+	"database/sql"
+	"di-demo/services"
+	"github.com/goioc/di"
+	"net/http"
+)
+
+type WeatherController struct {
+	// note that injection works even with unexported fields
+	weatherService *services.WeatherService `di.inject:"weatherService"`
+}
+
+func (wc *WeatherController) Weather(w http.ResponseWriter, r *http.Request) {
+	dbConnection := r.Context().Value(di.BeanKey("dbConnection")).(*sql.Conn)
+	city := r.URL.Query().Get("city")
+	_, _ = dbConnection.ExecContext(r.Context(), "insert into log values (?, ?, datetime('now'))", city, r.RemoteAddr)
+	weather, _ := wc.weatherService.Weather(city)
+	_, _ = w.Write([]byte(*weather))
+}
+```
+
+**controllers/index_controller.go**
+```go
+package controllers
+
+import (
+	"database/sql"
+	"fmt"
+	"github.com/goioc/di"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type IndexController struct {
+}
+
+func (ic *IndexController) Log(w http.ResponseWriter, r *http.Request) {
+	dbConnection := r.Context().Value(di.BeanKey("dbConnection")).(*sql.Conn)
+	rows, _ := dbConnection.QueryContext(r.Context(), "select * from log")
+	columns, _ := rows.Columns()
+	_, _ = w.Write([]byte(strings.ToUpper(fmt.Sprintf("Requests log: %v\n\n", columns))))
+	for rows.Next() {
+		var city string
+		var ip string
+		var dateTime time.Time
+		_ = rows.Scan(&city, &ip, &dateTime)
+		_, _ = w.Write([]byte(fmt.Sprintln(city, "\t", ip, "\t", dateTime)))
+	}
+}
+```
+
+**init.go**
+```go
+package main
+
+import (
+	"context"
+	"database/sql"
+	"di-demo/controllers"
+	"di-demo/services"
+	"github.com/goioc/di"
+	"os"
+	"reflect"
+)
+
+func init() {
+	_, _ = di.RegisterBean("weatherService", reflect.TypeOf((*services.WeatherService)(nil)))
+	_, _ = di.RegisterBean("indexController", reflect.TypeOf((*controllers.IndexController)(nil)))
+	_, _ = di.RegisterBean("weatherController", reflect.TypeOf((*controllers.WeatherController)(nil)))
+	_, _ = di.RegisterBeanFactory("db", di.Singleton, func() (interface{}, error) {
+		_ = os.Remove("./di-demo.db")
+		db, err := sql.Open("sqlite3", "./di-demo.db")
+		if err != nil {
+			return nil, err
+		}
+		db.SetMaxOpenConns(1)
+		_, err = db.Exec("create table log ('city' varchar not null, 'ip' varchar not null, 'time' datetime not null)")
+		return db, err
+	})
+	_, _ = di.RegisterBeanFactory("dbConnection", di.Request, func() (interface{}, error) {
+		db, err := di.GetInstanceSafe("db")
+		if err != nil {
+			return nil, err
+		}
+		return db.(*sql.DB).Conn(context.TODO())
+	})
+	_ = di.InitializeContainer()
+}
+```
+
+**main.go**
+```go
+package main
+
+import (
+	"di-demo/controllers"
+	"github.com/goioc/di"
+	"github.com/gorilla/mux"
+	_ "github.com/mattn/go-sqlite3"
+	"net/http"
+)
+
+func main() {
+	router := mux.NewRouter()
+	router.Use(di.Middleware)
+	router.Path("/").HandlerFunc(di.GetInstance("indexController").(*controllers.IndexController).Log)
+	router.Path("/weather").Queries("city", "{*?}").HandlerFunc(di.GetInstance("weatherController").(*controllers.WeatherController).Weather)
+	_ = http.ListenAndServe(":8080", router)
+}
+```
+
 ## Okaaay... More examples?
 
 Please, take a look at the [unit-tests](https://github.com/goioc/di/blob/master/di_test.go) for more examples.
-
-## Is there something more coming?
-
-Yes, definitely. The next thing to be implemented is a new scope: `Request`. This scope is, again, [inspired](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/context/request/RequestScope.html) by the Spring Framework: its life-cycle is bound to the HTTP request that is being processed. This scope is very useful for web-applications, but it's not essential for the IoC itself, so the development is slightly postponed (also, you can mimic `Request` scope even now with the combination of `Prototype` beans and/or bean factories). But stay tuned! 🤩
