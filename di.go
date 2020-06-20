@@ -41,6 +41,10 @@ const (
 	Singleton Scope = "singleton"
 	// Prototype is a scope of bean that can exist in multiple copies in the container and is created on demand.
 	Prototype Scope = "prototype"
+	// Request is a scope of bean whose lifecycle is bound to the web request (or more precisely - to the corresponding
+	// context). If the bean implements Close() method, then this method will be called upon corresponding context's
+	// cancellation.
+	Request Scope = "request"
 )
 
 // InitializingBean is an interface marking beans that need to be additionally initialized after the container is ready.
@@ -182,6 +186,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 	}
 	singleton := Singleton
 	prototype := Prototype
+	request := Request
 	if !ok {
 		return &singleton, nil
 	}
@@ -190,6 +195,8 @@ func getScope(bean reflect.Type) (*Scope, error) {
 		return &singleton, nil
 	case string(Prototype):
 		return &prototype, nil
+	case string(Request):
+		return &request, nil
 	}
 	return nil, errors.New("unsupported scope: " + scope)
 }
@@ -229,11 +236,10 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			"dependency bean":      beanToInject,
 			"dependency bean type": beanToInjectType,
 		}).Trace("Processing dependency")
-		instanceToInject, err := getInstance(beanToInject, chain)
-		if err != nil {
-			return err
+		if scopes[beanToInject] == Request {
+			return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
 		}
-		if instanceToInject == nil {
+		if _, ok := beans[beanToInject]; !ok {
 			optional := field.Tag.Get("di.optional")
 			value, err := strconv.ParseBool(optional)
 			if optional != "" && err != nil {
@@ -245,6 +251,10 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			} else {
 				return errors.New("no dependency found")
 			}
+		}
+		instanceToInject, err := getInstance(beanToInject, chain)
+		if err != nil {
+			return err
 		}
 		if fieldToInject.Kind() == reflect.Ptr || fieldToInject.Kind() == reflect.Interface {
 			fieldToInject.Set(reflect.ValueOf(instanceToInject))
@@ -340,14 +350,11 @@ func initializeInstance(beanID string, instance interface{}) error {
 // GetInstance function returns bean instance by its ID. It may panic, so if receiving the error in return is preferred,
 // consider using `GetInstanceSafe`.
 func GetInstance(beanID string) interface{} {
-	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
-		panic("container is not initialized: can't lookup instances of beans yet")
-	}
-	instance, err := getInstance(beanID, make(map[string]bool))
+	beanInstance, err := GetInstanceSafe(beanID)
 	if err != nil {
 		panic(err)
 	}
-	return instance
+	return beanInstance
 }
 
 // GetInstanceSafe function returns bean instance by its ID. It doesnt panic upon explicit error, but returns the error
@@ -356,34 +363,46 @@ func GetInstanceSafe(beanID string) (interface{}, error) {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		return nil, errors.New("container is not initialized: can't lookup instances of beans yet")
 	}
+	if scopes[beanID] == Request {
+		return nil, errors.New("request-scoped beans can't be retrieved directly from the container: they can only be retrieved from the web-context")
+	}
 	return getInstance(beanID, make(map[string]bool))
 }
 
+func getRequestBeanInstance(beanID string) interface{} {
+	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
+		panic("container is not initialized: can't lookup instances of beans yet")
+	}
+	beanInstance, err := getInstance(beanID, make(map[string]bool))
+	if err != nil {
+		panic(err)
+	}
+	return beanInstance
+}
+
 func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
-	switch scopes[beanID] {
-	case Prototype:
-		if _, ok := chain[beanID]; ok {
-			return nil, errors.New("circular dependency detected for bean: " + beanID)
-		}
-		chain[beanID] = true
-		instance, err := createInstance(beanID)
-		if err != nil {
-			return nil, err
-		}
-		if _, ok := beanFactories[beanID]; !ok {
-			err := injectDependencies(beanID, instance, chain)
-			if err != nil {
-				return nil, err
-			}
-		}
-		err = initializeInstance(beanID, instance)
-		if err != nil {
-			return nil, err
-		}
-		return instance, nil
-	default:
+	if scopes[beanID] == Singleton {
 		return singletonInstances[beanID], nil
 	}
+	if _, ok := chain[beanID]; ok {
+		return nil, errors.New("circular dependency detected for bean: " + beanID)
+	}
+	chain[beanID] = true
+	instance, err := createInstance(beanID)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := beanFactories[beanID]; !ok {
+		err := injectDependencies(beanID, instance, chain)
+		if err != nil {
+			return nil, err
+		}
+	}
+	err = initializeInstance(beanID, instance)
+	if err != nil {
+		return nil, err
+	}
+	return instance, nil
 }
 
 func resetContainer() {

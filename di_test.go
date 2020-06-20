@@ -325,15 +325,15 @@ func (suite *TestSuite) TestRegisterPrototypeBeanFactory() {
 	assert.True(suite.T(), instance1 != instance2)
 }
 
-type FailingBean struct {
+type failingBean struct {
 }
 
-func (fb *FailingBean) PostConstruct() error {
+func (fb *failingBean) PostConstruct() error {
 	return errors.New("error message")
 }
 
 func (suite *TestSuite) TestPostConstructReturnsError() {
-	overwritten, err := RegisterBean("failingBean", reflect.TypeOf((*FailingBean)(nil)))
+	overwritten, err := RegisterBean("failingBean", reflect.TypeOf((*failingBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("error message")
@@ -343,64 +343,64 @@ func (suite *TestSuite) TestPostConstructReturnsError() {
 	}
 }
 
-type PostConstructBean1 struct {
+type postConstructBean1 struct {
 	Value string
 }
 
-func (pcb *PostConstructBean1) PostConstruct() error {
+func (pcb *postConstructBean1) PostConstruct() error {
 	pcb.Value = "some content"
 	return nil
 }
 
-type PostConstructBean2 struct {
+type postConstructBean2 struct {
 	Scope              Scope `di.scope:"prototype"`
-	PostConstructBean1 *PostConstructBean1
+	PostConstructBean1 *postConstructBean1
 }
 
-func (pcb *PostConstructBean2) PostConstruct() error {
+func (pcb *postConstructBean2) PostConstruct() error {
 	instance, err := GetInstanceSafe("postConstructBean1")
 	if err != nil {
 		return err
 	}
-	pcb.PostConstructBean1 = instance.(*PostConstructBean1)
+	pcb.PostConstructBean1 = instance.(*postConstructBean1)
 	return nil
 }
 
-type PostConstructBean3 struct {
-	PostConstructBean2 *PostConstructBean2
+type postConstructBean3 struct {
+	PostConstructBean2 *postConstructBean2
 }
 
-func (pcb *PostConstructBean3) PostConstruct() error {
+func (pcb *postConstructBean3) PostConstruct() error {
 	instance, err := GetInstanceSafe("postConstructBean2")
 	if err != nil {
 		return err
 	}
-	pcb.PostConstructBean2 = instance.(*PostConstructBean2)
+	pcb.PostConstructBean2 = instance.(*postConstructBean2)
 	return nil
 }
 
 func (suite *TestSuite) TestPostConstruct() {
-	overwritten, err := RegisterBean("postConstructBean1", reflect.TypeOf((*PostConstructBean1)(nil)))
+	overwritten, err := RegisterBean("postConstructBean1", reflect.TypeOf((*postConstructBean1)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("postConstructBean2", reflect.TypeOf((*PostConstructBean2)(nil)))
+	overwritten, err = RegisterBean("postConstructBean2", reflect.TypeOf((*postConstructBean2)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("postConstructBean3", reflect.TypeOf((*PostConstructBean3)(nil)))
+	overwritten, err = RegisterBean("postConstructBean3", reflect.TypeOf((*postConstructBean3)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
-	assert.Equal(suite.T(), "some content", GetInstance("postConstructBean3").(*PostConstructBean3).PostConstructBean2.PostConstructBean1.Value)
+	assert.Equal(suite.T(), "some content", GetInstance("postConstructBean3").(*postConstructBean3).PostConstructBean2.PostConstructBean1.Value)
 }
 
-type CircularBean struct {
+type circularBean struct {
 	Scope        Scope         `di.scope:"prototype"`
-	CircularBean *CircularBean `di.inject:"circularBean"`
+	CircularBean *circularBean `di.inject:"circularBean"`
 }
 
 func (suite *TestSuite) TestDirectCircularDependency() {
-	overwritten, err := RegisterBean("circularBean", reflect.TypeOf((*CircularBean)(nil)))
+	overwritten, err := RegisterBean("circularBean", reflect.TypeOf((*circularBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -413,18 +413,38 @@ func (suite *TestSuite) TestDirectCircularDependency() {
 	}
 }
 
-func (suite *TestSuite) TestIndirectCircularDependency() {
+func (suite *TestSuite) TestRequestBeanInjection() {
+	type RequestBean struct {
+		Scope Scope `di.scope:"request"`
+	}
 	type SingletonBean struct {
-		CircularBean *CircularBean `di.inject:"circularBean"`
+		RequestBean *string `di.inject:"requestBean"`
 	}
 	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("circularBean", reflect.TypeOf((*CircularBean)(nil)))
+	overwritten, err = RegisterBean("requestBean", reflect.TypeOf((*RequestBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("circular dependency detected for bean: circularBean")
+	expectedError := errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
 	err = InitializeContainer()
+	if assert.Error(suite.T(), err) {
+		assert.Equal(suite.T(), expectedError, err)
+	}
+}
+
+func (suite *TestSuite) TestRequestBeanRetrieval() {
+	type RequestBean struct {
+		Scope Scope `di.scope:"request"`
+	}
+	overwritten, err := RegisterBean("requestBean", reflect.TypeOf((*RequestBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	expectedError := errors.New("request-scoped beans can't be retrieved directly from the container: they can only be retrieved from the web-context")
+	instance, err := GetInstanceSafe("requestBean")
+	assert.Nil(suite.T(), instance)
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
