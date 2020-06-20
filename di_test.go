@@ -325,19 +325,41 @@ func (suite *TestSuite) TestRegisterPrototypeBeanFactory() {
 	assert.True(suite.T(), instance1 != instance2)
 }
 
-type failingBean struct {
+type failingSingletonBean struct {
 }
 
-func (fb *failingBean) PostConstruct() error {
+func (fsb *failingSingletonBean) PostConstruct() error {
 	return errors.New("error message")
 }
 
-func (suite *TestSuite) TestPostConstructReturnsError() {
-	overwritten, err := RegisterBean("failingBean", reflect.TypeOf((*failingBean)(nil)))
+func (suite *TestSuite) TestSingletonPostConstructReturnsError() {
+	overwritten, err := RegisterBean("failingSingletonBean", reflect.TypeOf((*failingSingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("error message")
 	err = InitializeContainer()
+	if assert.Error(suite.T(), err) {
+		assert.Equal(suite.T(), expectedError, err)
+	}
+}
+
+type failingPrototypeBean struct {
+	Scope Scope `di.scope:"prototype"`
+}
+
+func (fpb *failingPrototypeBean) PostConstruct() error {
+	return errors.New("error message")
+}
+
+func (suite *TestSuite) TestPrototypePostConstructReturnsError() {
+	overwritten, err := RegisterBean("failingPrototypeBean", reflect.TypeOf((*failingPrototypeBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	expectedError := errors.New("error message")
+	beanInstance, err := GetInstanceSafe("failingPrototypeBean")
+	assert.Nil(suite.T(), beanInstance)
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
