@@ -61,12 +61,7 @@ type WeatherController struct {
 }
 
 func (wc *WeatherController) Weather(w http.ResponseWriter, r *http.Request) {
-	cities, ok := r.URL.Query()["city"]
-	if !ok || len(cities) < 1 {
-		_, _ = w.Write([]byte("required parameter 'city' is missing"))
-		return
-	}
-	weather, _ := wc.weatherService.Weather(cities[0])
+	weather, _ := wc.weatherService.Weather(r.URL.Query().Get("city"))
 	_, _ = w.Write([]byte(*weather))
 }
 ```
