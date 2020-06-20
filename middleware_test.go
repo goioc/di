@@ -23,6 +23,9 @@ import (
 
 var closed bool
 
+type singletonBean struct {
+}
+
 type requestBean struct {
 	Scope Scope `di.scope:"request"`
 }
@@ -33,12 +36,18 @@ func (rb *requestBean) Close() error {
 }
 
 func (suite *TestSuite) TestMiddleware() {
-	overwritten, err := RegisterBean("requestBean", reflect.TypeOf((*requestBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*singletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("requestBean", reflect.TypeOf((*requestBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
 	middleware := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		singletonBeanInstance, ok := r.Context().Value(BeanKey("singletonBean")).(*requestBean)
+		assert.False(suite.T(), ok)
+		assert.Nil(suite.T(), singletonBeanInstance)
 		requestBeanInstance, ok := r.Context().Value(BeanKey("requestBean")).(*requestBean)
 		assert.True(suite.T(), ok)
 		assert.NotNil(suite.T(), requestBeanInstance)
