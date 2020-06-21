@@ -183,11 +183,29 @@ As was mentioned above, one bean can be injected into another with the `PostCons
 
 ```go
 type SingletonBean struct {
-	SomeOtherBean string `di.inject:"someOtherBean"`
+	SomeOtherBean *SomeOtherBean `di.inject:"someOtherBean"`
 }
 ```
 
-And just a reminder: you can't inject `Request` beans.
+... or via interface ...
+
+```go
+type SingletonBean struct {
+	SomeOtherBean SomeOtherBeansInterface `di.inject:"someOtherBean"`
+}
+```
+
+Note that you can refer depepndencies either by pointer, or by interface, but not by value. And just a reminder: you can't inject `Request` beans.
+
+Sometimes we might want to have optional dependencies. By default, all declared depepndencies are considered to be requred: if some dependency is not found in the Container, you will get an error. But you can specify an optional dependency like this:
+
+```go
+type SingletonBean struct {
+	SomeOtherBean *string `di.inject:"someOtherBean" di.optional:"true"`
+}
+```
+
+In this case, if `someOtherBean` is not found in the Container, you will get `nill` injected into this field.
 
 ### Circular dependencies
 
