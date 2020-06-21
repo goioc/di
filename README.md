@@ -103,7 +103,7 @@ func main() {
 
 If you run it, you should be able to observe a neat weather forecast at http://localhost:8080/weather?city=London (or for any other city).
 
-Of course, for such a simple example it may look like an overkill. But for larger projects with many interconnected services with complicated business-logic, it can really simplify your life!
+Of course, for such a simple example it may look like an overkill. But for larger projects with many interconnected services with complicated business logic, it can really simplify your life!
 
 ## Looks nice... Give me some details!
 
@@ -149,7 +149,7 @@ di.RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
 
 ### Beans initialization
 
-There's a special interface `InitializingBean` that can be implemented to provide your bean with some initialization logic that will we executed after the container is initialized (for `Singleton` beans) or after the `Prototype` instance is created. Again, you can also lookup other beans during initialization (since the container is ready by that time):
+There's a special interface `InitializingBean` that can be implemented to provide your bean with some initialization logic that will we executed after the container is initialized (for `Singleton` beans) or after the `Prototype`/`Request` instance is created. Again, you can also lookup other beans during initialization (since the container is ready by that time):
 
 ```go
 type PostConstructBean1 struct {
@@ -187,6 +187,8 @@ type SingletonBean struct {
 }
 ```
 
+And just a reminder: you can't inject `Request` beans.
+
 ### Circular dependencies
 
 The problem with all IoC containers is that beans' interconnection may suffer from so-called circular dependencies. Consider this example:
@@ -198,11 +200,11 @@ type CircularBean struct {
 }
 ```
 
-Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸 
+Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype`/`Request` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸 
 
 ## What about middleware?
 
-We have some 😄 Here's an example with [gorilla/mux](https://github.com/gorilla/mux) router (but feel free to use any other router). 
+We have some 😎 Here's an example with [gorilla/mux](https://github.com/gorilla/mux) router (but feel free to use any other router). 
 Basically, it's an extension of the very first example with the weather controller, but this time we add `Request` beans and access them via request's context. 
 Also, this example demonstrates how DI can automatically close resources for you (DB connection in this case). The proper error handling is, again, omitted for simplicity.
 
@@ -282,19 +284,13 @@ func init() {
 	_, _ = di.RegisterBean("weatherController", reflect.TypeOf((*controllers.WeatherController)(nil)))
 	_, _ = di.RegisterBeanFactory("db", di.Singleton, func() (interface{}, error) {
 		_ = os.Remove("./di-demo.db")
-		db, err := sql.Open("sqlite3", "./di-demo.db")
-		if err != nil {
-			return nil, err
-		}
+		db, _ := sql.Open("sqlite3", "./di-demo.db")
 		db.SetMaxOpenConns(1)
-		_, err = db.Exec("create table log ('city' varchar not null, 'ip' varchar not null, 'time' datetime not null)")
-		return db, err
+		_, _ = db.Exec("create table log ('city' varchar not null, 'ip' varchar not null, 'time' datetime not null)")
+		return db, nil
 	})
 	_, _ = di.RegisterBeanFactory("dbConnection", di.Request, func() (interface{}, error) {
-		db, err := di.GetInstanceSafe("db")
-		if err != nil {
-			return nil, err
-		}
+		db, _ := di.GetInstanceSafe("db")
 		return db.(*sql.DB).Conn(context.TODO())
 	})
 	_ = di.InitializeContainer()
