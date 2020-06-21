@@ -30,7 +30,7 @@ func (suite *TestSuite) TearDownTest() {
 	resetContainer()
 }
 
-func TestExampleTestSuite(t *testing.T) {
+func TestDITestSuite(t *testing.T) {
 	suite.Run(t, new(TestSuite))
 }
 
