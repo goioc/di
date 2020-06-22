@@ -471,3 +471,25 @@ func (suite *TestSuite) TestRequestBeanRetrieval() {
 		assert.Equal(suite.T(), expectedError, err)
 	}
 }
+
+func (suite *TestSuite) TestGetBeanTypes() {
+	type SomeBean struct {
+		Scope Scope `di.scope:"prototype"`
+	}
+	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SomeBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBeanInstance("beanInstance", new(string))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	beansTypes := GetBeanTypes()
+	assert.Len(suite.T(), beansTypes, 2)
+	assert.Contains(suite.T(), beansTypes, "bean")
+	bean := beansTypes["bean"]
+	assert.Equal(suite.T(), reflect.TypeOf((*SomeBean)(nil)), bean)
+	assert.Contains(suite.T(), beansTypes, "beanInstance")
+	beanInstance := beansTypes["beanInstance"]
+	assert.Equal(suite.T(), reflect.TypeOf((*string)(nil)), beanInstance)
+	beansTypes["newBean"] = nil
+	assert.Len(suite.T(), GetBeanTypes(), 2)
+}

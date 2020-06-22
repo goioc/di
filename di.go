@@ -405,6 +405,18 @@ func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
 	return instance, nil
 }
 
+// GetBeanTypes returns a map (copy) of beans registered in the Container, omitting bean factories, because their real
+// return type is unknown.
+func GetBeanTypes() map[string]reflect.Type {
+	initializeLock.Lock()
+	defer initializeLock.Unlock()
+	allBeans := make(map[string]reflect.Type)
+	for k, v := range beans {
+		allBeans[k] = v
+	}
+	return allBeans
+}
+
 func resetContainer() {
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
