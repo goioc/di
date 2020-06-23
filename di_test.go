@@ -493,3 +493,33 @@ func (suite *TestSuite) TestGetBeanTypes() {
 	beansTypes["newBean"] = nil
 	assert.Len(suite.T(), GetBeanTypes(), 2)
 }
+
+func (suite *TestSuite) TestGetBeanScopes() {
+	type SomeBean struct {
+		Scope Scope `di.scope:"prototype"`
+	}
+	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SomeBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBeanInstance("beanInstance", new(string))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBeanFactory("beanFactory", Request, func() (interface{}, error) {
+		return new(string), nil
+	})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	beansScopes := GetBeanScopes()
+	assert.Len(suite.T(), beansScopes, 3)
+	assert.Contains(suite.T(), beansScopes, "bean")
+	bean := beansScopes["bean"]
+	assert.Equal(suite.T(), Prototype, bean)
+	assert.Contains(suite.T(), beansScopes, "beanInstance")
+	beanInstance := beansScopes["beanInstance"]
+	assert.Equal(suite.T(), Singleton, beanInstance)
+	assert.Contains(suite.T(), beansScopes, "beanInstance")
+	beanFactory := beansScopes["beanFactory"]
+	assert.Equal(suite.T(), Request, beanFactory)
+	beansScopes["newBean"] = Singleton
+	assert.Len(suite.T(), GetBeanScopes(), 3)
+}

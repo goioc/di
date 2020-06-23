@@ -410,11 +410,22 @@ func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
 func GetBeanTypes() map[string]reflect.Type {
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
-	allBeans := make(map[string]reflect.Type)
+	beanTypes := make(map[string]reflect.Type)
 	for k, v := range beans {
-		allBeans[k] = v
+		beanTypes[k] = v
 	}
-	return allBeans
+	return beanTypes
+}
+
+// GetBeanScopes returns a map (copy) of bean scopes registered in the Container.
+func GetBeanScopes() map[string]Scope {
+	initializeLock.Lock()
+	defer initializeLock.Unlock()
+	beanScopes := make(map[string]Scope)
+	for k, v := range scopes {
+		beanScopes[k] = v
+	}
+	return beanScopes
 }
 
 func resetContainer() {
