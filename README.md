@@ -7,6 +7,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/goioc/di)](https://goreportcard.com/report/github.com/goioc/di)
 [![codecov](https://codecov.io/gh/goioc/di/branch/master/graph/badge.svg)](https://codecov.io/gh/goioc/di)
 [![Dependabot Status](https://api.dependabot.com/badges/status?host=github&repo=goioc/di)](https://dependabot.com)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=goioc_di&metric=alert_status)](https://sonarcloud.io/dashboard?id=goioc_di)
 [![DeepSource](https://static.deepsource.io/deepsource-badge-light-mini.svg)](https://deepsource.io/gh/goioc/di/?ref=repository-badge)
 
 ## Why DI in Go? Why IoC at all?
