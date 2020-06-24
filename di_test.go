@@ -325,6 +325,24 @@ func (suite *TestSuite) TestRegisterPrototypeBeanFactory() {
 	assert.True(suite.T(), instance1 != instance2)
 }
 
+func (suite *TestSuite) TestBeanFunction() {
+	overwritten, err := RegisterBeanFactory("beanFunction", Singleton, func() (interface{}, error) {
+		f := func(x int) int {
+			return x + 42
+		}
+		return &f, nil
+	})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("beanFunction")
+	assert.NotNil(suite.T(), instance)
+	assert.NoError(suite.T(), err)
+	beanFunction := *instance.(*func(int) int)
+	assert.Equal(suite.T(), 43, beanFunction(1))
+}
+
 type failingSingletonBean struct {
 }
 
