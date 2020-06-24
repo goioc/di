@@ -334,6 +334,8 @@ func (suite *TestSuite) TestInjectingBeanFactory() {
 		s := "test"
 		return &s, nil
 	})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
 	overwritten, err = RegisterBean("beanWithInjectedBeanFactory", reflect.TypeOf((*beanWithInjectedBeanFactory)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
