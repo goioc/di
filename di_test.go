@@ -325,6 +325,27 @@ func (suite *TestSuite) TestRegisterPrototypeBeanFactory() {
 	assert.True(suite.T(), instance1 != instance2)
 }
 
+type beanWithInjectedBeanFactory struct {
+	BeanFactoryDependency *string `di.inject:"beanFactory"`
+}
+
+func (suite *TestSuite) TestInjectingBeanFactory() {
+	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
+		s := "test"
+		return &s, nil
+	})
+	overwritten, err = RegisterBean("beanWithInjectedBeanFactory", reflect.TypeOf((*beanWithInjectedBeanFactory)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("beanWithInjectedBeanFactory")
+	assert.NotNil(suite.T(), instance)
+	assert.NoError(suite.T(), err)
+	beanWithInjectedBeanFactory := instance.(*beanWithInjectedBeanFactory)
+	assert.Equal(suite.T(), "test", *beanWithInjectedBeanFactory.BeanFactoryDependency)
+}
+
 func (suite *TestSuite) TestBeanFunction() {
 	overwritten, err := RegisterBeanFactory("beanFunction", Singleton, func() (interface{}, error) {
 		f := func(x int) int {

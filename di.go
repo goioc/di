@@ -239,7 +239,9 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		if scopes[beanToInject] == Request {
 			return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
 		}
-		if _, ok := beans[beanToInject]; !ok {
+		_, beanFound := beans[beanToInject]
+		_, beanFactoryFound := beanFactories[beanToInject]
+		if !beanFound && !beanFactoryFound {
 			optional := field.Tag.Get("di.optional")
 			value, err := strconv.ParseBool(optional)
 			if optional != "" && err != nil {
