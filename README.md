@@ -117,8 +117,8 @@ The main component of the library is the [Inversion of Control Container](https:
 - **Request**. Similar to `Prototype`, however it has a few differences and features (since its lifecycle is bound to a web request):
    - Can't be injected to other beans.
    - Can't be manually retrieved from the Container.
-   - `Prototype` beans are automatically injected to the `context.Context` of a corresponding `http.Request`. 
-   - If a `Prototype` bean implements `io.Closer`, it will be "closed" upon corresponding request's cancellation.
+   - `Request` beans are automatically injected to the `context.Context` of a corresponding `http.Request`. 
+   - If a `Request` bean implements `io.Closer`, it will be "closed" upon corresponding request's cancellation.
 
 ### Beans registration
 
