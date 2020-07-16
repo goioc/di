@@ -138,7 +138,7 @@ For this type of beans, the only supported scope is `Singleton`, because I don't
 - **Via bean factory**. If you have a method that is producing instances for you, you can register it as a bean factory:
 ```go
 di.RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
-		return "My awesome string that is go to become a bean!", nil
+		return "My awesome string that is going to become a bean!", nil
 	})
 ```
 Feel free to use any scope with this method. By the way, you can even lookup other beans within the factory:
