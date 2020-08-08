@@ -460,4 +460,5 @@ func resetContainer() {
 	scopes = make(map[string]Scope)
 	singletonInstances = make(map[string]interface{})
 	userCreatedInstances = make(map[string]bool)
+	beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
 }
