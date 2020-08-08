@@ -1,7 +1,7 @@
 # goioc/di: Dependency Injection
 [![goioc](https://habrastorage.org/webt/ym/pu/dc/ympudccm7j7a3qex_jjroxgsiwg.png)](https://github.com/goioc)
 
-![Go](https://github.com/goioc/di/workflows/Go/badge.svg)
+[![Go](https://github.com/goioc/di/workflows/Go/badge.svg)](https://github.com/goioc/di/actions)
 [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/goioc/di/?tab=doc)
 [![CodeFactor](https://www.codefactor.io/repository/github/goioc/di/badge)](https://www.codefactor.io/repository/github/goioc/di)
 [![Go Report Card](https://goreportcard.com/badge/github.com/goioc/di)](https://goreportcard.com/report/github.com/goioc/di)
