@@ -32,6 +32,7 @@ var beanFactories = make(map[string]func() (interface{}, error))
 var scopes = make(map[string]Scope)
 var singletonInstances = make(map[string]interface{})
 var userCreatedInstances = make(map[string]bool)
+var beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
 
 // Scope is a enum for bean scopes supported in this IoC container.
 type Scope string
@@ -55,6 +56,18 @@ type InitializingBean interface {
 
 func init() {
 	logrus.SetFormatter(&logrus.TextFormatter{})
+}
+
+// RegisterBeanPostprocessor function registers postprocessors for beans. Postprocessor is a function that can perform
+// some actions on beans after their creation by the container (and self-initialization with PostConstruct).
+func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean interface{}) error) error {
+	initializeLock.Lock()
+	defer initializeLock.Unlock()
+	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
+		return errors.New("container is already initialized: can't register bean postprocessor")
+	}
+	beanPostprocessors[beanType] = append(beanPostprocessors[beanType], postprocessor)
+	return nil
 }
 
 // InitializeContainer function initializes the IoC container.
@@ -344,6 +357,14 @@ func initializeInstance(beanID string, instance interface{}) error {
 		errorValue := initializingMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance)})[0]
 		if !errorValue.IsNil() {
 			return errorValue.Elem().Interface().(error)
+		}
+	}
+	if postprocessors, ok := beanPostprocessors[bean]; ok {
+		logrus.WithField("beanID", beanID).Trace("Postprocessing bean")
+		for _, postprocessor := range postprocessors {
+			if err := postprocessor(instance); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

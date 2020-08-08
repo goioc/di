@@ -82,6 +82,16 @@ func (suite *TestSuite) TestRegisterBeanAfterContainerInitialization() {
 	}
 }
 
+func (suite *TestSuite) TestRegisterBeanPostprocessorAfterContainerInitialization() {
+	err := InitializeContainer()
+	assert.NoError(suite.T(), err)
+	expectedError := errors.New("container is already initialized: can't register bean postprocessor")
+	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), nil)
+	if assert.Error(suite.T(), err) {
+		assert.Equal(suite.T(), expectedError, err)
+	}
+}
+
 func (suite *TestSuite) TestRegisterNonReferenceBean() {
 	expectedError := errors.New("bean type must be a pointer")
 	overwritten, err := RegisterBean("", reflect.TypeOf(""))
@@ -455,6 +465,46 @@ func (suite *TestSuite) TestPostConstruct() {
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), "some content", GetInstance("postConstructBean3").(*postConstructBean3).PostConstructBean2.PostConstructBean1.Value)
+}
+
+func (suite *TestSuite) TestBeanPostprocessorReturnsError() {
+	overwritten, err := RegisterBeanInstance("postprocessedBean", new(string))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	expectedError := errors.New("some error")
+	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), func(instance interface{}) error {
+		return expectedError
+	})
+	err = InitializeContainer()
+	if assert.Error(suite.T(), err) {
+		assert.Equal(suite.T(), expectedError, err)
+	}
+}
+
+type postprocessedBean struct {
+	a string
+	b string
+}
+
+func (suite *TestSuite) TestBeanPostprocessors() {
+	overwritten, err := RegisterBean("postprocessedBean", reflect.TypeOf((*postprocessedBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
+		instance.(*postprocessedBean).a = "Hello, "
+		return nil
+	})
+	err = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
+		instance.(*postprocessedBean).b = "world!"
+		return nil
+	})
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("postprocessedBean")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance)
+	postprocessedBean := instance.(*postprocessedBean)
+	assert.Equal(suite.T(), "Hello, world!", postprocessedBean.a+postprocessedBean.b)
 }
 
 type circularBean struct {
