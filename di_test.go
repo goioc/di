@@ -65,6 +65,7 @@ func (suite *TestSuite) TestRegisterBeanAfterContainerInitialization() {
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("container is already initialized: can't register new bean")
+	expectedFactoryError := errors.New("container is already initialized: can't register new bean factory")
 	overwritten, err := RegisterBean("", nil)
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
@@ -77,9 +78,26 @@ func (suite *TestSuite) TestRegisterBeanAfterContainerInitialization() {
 	}
 	overwritten, err = RegisterBeanFactory("", Singleton, nil)
 	assert.False(suite.T(), overwritten)
-	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
-	}
+	assert.Error(suite.T(), err)
+	assert.Equal(suite.T(), expectedFactoryError, err)
+}
+
+func (suite *TestSuite) TestBeanFactoryCalledOnce() {
+	var countOfCalls = 0
+	overwritten, err := RegisterBeanFactory("beanId", Singleton, func() (interface{}, error) {
+		countOfCalls++
+		return new(string), nil
+	})
+	assert.False(suite.T(), overwritten)
+	assert.Nil(suite.T(), err)
+	err = InitializeContainer()
+	assert.False(suite.T(), overwritten)
+	assert.Nil(suite.T(), err)
+	assert.Equal(suite.T(), 1, countOfCalls)
+	instance, err := GetInstanceSafe("beanId")
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), instance)
+	assert.Equal(suite.T(), 1, countOfCalls)
 }
 
 func (suite *TestSuite) TestRegisterBeanPostprocessorAfterContainerInitialization() {
@@ -216,7 +234,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanMissingOptionalDependency() {
 	assert.NoError(suite.T(), err)
 }
 
-func (suite *TestSuite) TestRegisterBeanWithOverwriting() {
+func (suite *TestSuite) TestRegisterBeanInstanceWithOverwriting() {
 	overwritten, err := RegisterBeanInstance("bean", new(string))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
@@ -225,6 +243,43 @@ func (suite *TestSuite) TestRegisterBeanWithOverwriting() {
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
+}
+
+func (suite *TestSuite) TestRegisterBeanWithOverwriting() {
+	type Bean1 struct {
+	}
+	type Bean2 struct {
+	}
+	overwritten, err := RegisterBean("bean", reflect.TypeOf((*Bean1)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("bean", reflect.TypeOf((*Bean2)(nil)))
+	assert.True(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	bean2 := GetInstance("bean").(*Bean2)
+	assert.NotNil(suite.T(), bean2)
+}
+
+func (suite *TestSuite) TestRegisterBeanWithOverwritingFromSingletonToPrototypeScope() {
+	type SingletonBean struct {
+		Scope Scope `di.scope:"singleton"`
+	}
+	type PrototypeBean struct {
+		Scope Scope `di.scope:"prototype"`
+	}
+	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("bean", reflect.TypeOf((*PrototypeBean)(nil)))
+	assert.True(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance1 := GetInstance("bean").(*PrototypeBean)
+	instance2 := GetInstance("bean").(*PrototypeBean)
+	assert.False(suite.T(), instance1 == instance2)
 }
 
 func (suite *TestSuite) TestRegisterSingletonBeanImplicitScope() {
@@ -356,6 +411,50 @@ func (suite *TestSuite) TestInjectingBeanFactory() {
 	assert.NoError(suite.T(), err)
 	beanWithInjectedBeanFactory := instance.(*beanWithInjectedBeanFactory)
 	assert.Equal(suite.T(), "test", *beanWithInjectedBeanFactory.BeanFactoryDependency)
+}
+
+func (suite *TestSuite) TestInjectingBeanFactoryWithOverwriting() {
+	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
+		s := "test"
+		return &s, nil
+	})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
+		s := "test_overwritten"
+		return &s, nil
+	})
+	assert.True(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("beanFactory")
+	assert.NotNil(suite.T(), instance)
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), "test_overwritten", *instance.(*string))
+}
+
+func (suite *TestSuite) TestInjectingBeanFactoryWithOverwritingFromSingletonToPrototypeScope() {
+	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
+		s := "test"
+		return &s, nil
+	})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBeanFactory("beanFactory", Prototype, func() (interface{}, error) {
+		s := "test_overwritten"
+		return &s, nil
+	})
+	assert.True(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("beanFactory")
+	assert.NotNil(suite.T(), instance)
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), "test_overwritten", *instance.(*string))
+	instance2, err := GetInstanceSafe("beanFactory")
+	assert.False(suite.T(), instance == instance2)
 }
 
 func (suite *TestSuite) TestBeanFunction() {
@@ -561,7 +660,43 @@ func (suite *TestSuite) TestRequestBeanRetrieval() {
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
+	assert.Panics(suite.T(), func() {
+		GetInstance("requestBean")
+	})
 }
+
+func (suite *TestSuite) TestFailRequestBeanRetrieval() {
+	overwritten, err := RegisterBeanFactory("requestBean", Request, func() (interface{}, error) {
+		return nil, errors.New("Cannot initialize request bean")
+	})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	assert.Panics(suite.T(), func() {
+		getRequestBeanInstance("requestBean")
+	})
+}
+
+//func (suite *TestSuite) TestFailSingletonBeanRetrieval() {
+//	type SingletonBean struct {
+//	}
+//	expectedError := errors.New("Cannot initialize request bean")
+//	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+//	assert.False(suite.T(), overwritten)
+//	assert.NoError(suite.T(), err)
+//	testHookCreateInstanceOriginal:=testHookCreateInstance
+//	defer func() {
+//		testHookCreateInstance = testHookCreateInstanceOriginal
+//	}()
+//
+//	testHookCreateInstance = func(beanID string) (interface{}, error) {
+//		return nil,expectedError
+//	}
+//	err = InitializeContainer()
+//	assert.Error(suite.T(), err)
+//	assert.Equal(suite.T(), expectedError, err)
+//}
 
 func (suite *TestSuite) TestGetBeanTypes() {
 	type SomeBean struct {

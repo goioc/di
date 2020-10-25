@@ -58,3 +58,19 @@ func (suite *TestSuite) TestMiddleware() {
 	assert.NoError(suite.T(), err)
 	assert.True(suite.T(), closed)
 }
+
+func (suite *TestSuite) TestMiddlewareNotInitialized() {
+	overwritten, err := RegisterBean("requestBean", reflect.TypeOf((*requestBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	middleware := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestBeanInstance, ok := r.Context().Value(BeanKey("requestBean")).(*requestBean)
+		assert.True(suite.T(), ok)
+		assert.NotNil(suite.T(), requestBeanInstance)
+	}))
+	server := httptest.NewServer(middleware)
+	defer server.Close()
+	resp, err := http.Get(server.URL)
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), resp)
+}

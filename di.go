@@ -171,15 +171,13 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (int
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
-		return false, errors.New("container is already initialized: can't register new bean")
+		return false, errors.New("container is already initialized: can't register new bean factory")
 	}
-	var existingBeanType reflect.Type
 	var ok bool
-	if existingBeanType, ok = beans[beanID]; ok {
+	if _, ok = beanFactories[beanID]; ok {
 		logrus.WithFields(logrus.Fields{
-			"id":              beanID,
-			"registered bean": existingBeanType,
-		}).Warn("Bean with such ID is already registered, overwriting it")
+			"id": beanID,
+		}).Warn("Bean Factory with such ID is already registered, overwriting it")
 	}
 	scopes[beanID] = beanScope
 	beanFactories[beanID] = beanFactory
@@ -271,6 +269,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		if err != nil {
 			return err
 		}
+		//todo validation code part can be moved above for fail-fast purposes
 		if fieldToInject.Kind() == reflect.Ptr || fieldToInject.Kind() == reflect.Interface {
 			fieldToInject.Set(reflect.ValueOf(instanceToInject))
 		} else {
@@ -349,9 +348,9 @@ func initializeInstance(beanID string, instance interface{}) error {
 	initializingBean := reflect.TypeOf((*InitializingBean)(nil)).Elem()
 	bean := reflect.TypeOf(instance)
 	if bean.Implements(initializingBean) {
-		initializingMethod, ok := bean.MethodByName(initializingBean.Method(0).Name)
+		initializingMethod, ok := bean.MethodByName("PostConstruct")
 		if !ok {
-			return errors.New("can't find method PostConstruct() in bean " + bean.String())
+			return errors.New("Unexpected Behavior: Can't find method PostConstruct() in bean " + bean.String())
 		}
 		logrus.WithField("beanID", beanID).Trace("Initializing bean")
 		errorValue := initializingMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance)})[0]
