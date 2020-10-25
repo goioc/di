@@ -413,7 +413,7 @@ func (suite *TestSuite) TestInjectingBeanFactory() {
 	assert.Equal(suite.T(), "test", *beanWithInjectedBeanFactory.BeanFactoryDependency)
 }
 
-func (suite *TestSuite) TestInjectingBeanFactoryWithOverwriting() {
+func (suite *TestSuite) TestRegisterBeanFactoryWithOverwriting() {
 	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
 		s := "test"
 		return &s, nil
@@ -434,7 +434,7 @@ func (suite *TestSuite) TestInjectingBeanFactoryWithOverwriting() {
 	assert.Equal(suite.T(), "test_overwritten", *instance.(*string))
 }
 
-func (suite *TestSuite) TestInjectingBeanFactoryWithOverwritingFromSingletonToPrototypeScope() {
+func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromSingletonToPrototypeScope() {
 	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
 		s := "test"
 		return &s, nil
