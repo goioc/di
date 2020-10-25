@@ -678,26 +678,6 @@ func (suite *TestSuite) TestFailRequestBeanRetrieval() {
 	})
 }
 
-//func (suite *TestSuite) TestFailSingletonBeanRetrieval() {
-//	type SingletonBean struct {
-//	}
-//	expectedError := errors.New("Cannot initialize request bean")
-//	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
-//	assert.False(suite.T(), overwritten)
-//	assert.NoError(suite.T(), err)
-//	testHookCreateInstanceOriginal:=testHookCreateInstance
-//	defer func() {
-//		testHookCreateInstance = testHookCreateInstanceOriginal
-//	}()
-//
-//	testHookCreateInstance = func(beanID string) (interface{}, error) {
-//		return nil,expectedError
-//	}
-//	err = InitializeContainer()
-//	assert.Error(suite.T(), err)
-//	assert.Equal(suite.T(), expectedError, err)
-//}
-
 func (suite *TestSuite) TestGetBeanTypes() {
 	type SomeBean struct {
 		Scope Scope `di.scope:"prototype"`
