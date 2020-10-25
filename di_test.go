@@ -454,6 +454,8 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromSingletonToPro
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), "test_overwritten", *instance.(*string))
 	instance2, err := GetInstanceSafe("beanFactory")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance2)
 	assert.False(suite.T(), instance == instance2)
 }
 
@@ -574,6 +576,7 @@ func (suite *TestSuite) TestBeanPostprocessorReturnsError() {
 	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), func(instance interface{}) error {
 		return expectedError
 	})
+	assert.Nil(suite.T(), err)
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
@@ -593,10 +596,12 @@ func (suite *TestSuite) TestBeanPostprocessors() {
 		instance.(*postprocessedBean).a = "Hello, "
 		return nil
 	})
+	assert.Nil(suite.T(), err)
 	err = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
 		instance.(*postprocessedBean).b = "world!"
 		return nil
 	})
+	assert.Nil(suite.T(), err)
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
 	instance, err := GetInstanceSafe("postprocessedBean")
