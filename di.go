@@ -243,6 +243,9 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		beanToInjectType := beans[beanToInject]
 		fieldToInject := reflect.ValueOf(instance).Elem().Field(i)
 		fieldToInject = reflect.NewAt(fieldToInject.Type(), unsafe.Pointer(fieldToInject.UnsafeAddr())).Elem()
+		if fieldToInject.Kind() != reflect.Ptr && fieldToInject.Kind() != reflect.Interface {
+			return errors.New("unsupported dependency type: all injections must be done by reference")
+		}
 		logrus.WithFields(logrus.Fields{
 			"bean":                 beanID,
 			"bean type":            instanceElement,
@@ -271,12 +274,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		if err != nil {
 			return err
 		}
-		//todo validation code part can be moved above for fail-fast purposes
-		if fieldToInject.Kind() == reflect.Ptr || fieldToInject.Kind() == reflect.Interface {
-			fieldToInject.Set(reflect.ValueOf(instanceToInject))
-		} else {
-			return errors.New("unsupported dependency type: all injections must be done by reference")
-		}
+		fieldToInject.Set(reflect.ValueOf(instanceToInject))
 	}
 	return nil
 }
