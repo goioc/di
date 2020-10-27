@@ -173,11 +173,13 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (int
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return false, errors.New("container is already initialized: can't register new bean factory")
 	}
+	var existingBeanType reflect.Type
 	var ok bool
-	if _, ok = beanFactories[beanID]; ok {
+	if existingBeanType, ok = beans[beanID]; ok {
 		logrus.WithFields(logrus.Fields{
-			"id": beanID,
-		}).Warn("Bean Factory with such ID is already registered, overwriting it")
+			"id":              beanID,
+			"registered bean": existingBeanType,
+		}).Warn("Bean with such ID is already registered, overwriting it")
 	}
 	scopes[beanID] = beanScope
 	beanFactories[beanID] = beanFactory
