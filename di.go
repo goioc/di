@@ -171,7 +171,7 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (int
 	initializeLock.Lock()
 	defer initializeLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
-		return false, errors.New("container is already initialized: can't register new bean")
+		return false, errors.New("container is already initialized: can't register new bean factory")
 	}
 	var existingBeanType reflect.Type
 	var ok bool
@@ -271,6 +271,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		if err != nil {
 			return err
 		}
+		//todo validation code part can be moved above for fail-fast purposes
 		if fieldToInject.Kind() == reflect.Ptr || fieldToInject.Kind() == reflect.Interface {
 			fieldToInject.Set(reflect.ValueOf(instanceToInject))
 		} else {
@@ -351,7 +352,7 @@ func initializeInstance(beanID string, instance interface{}) error {
 	if bean.Implements(initializingBean) {
 		initializingMethod, ok := bean.MethodByName(initializingBean.Method(0).Name)
 		if !ok {
-			return errors.New("can't find method PostConstruct() in bean " + bean.String())
+			return errors.New("Unexpected Behavior: Can't find method PostConstruct() in bean " + bean.String())
 		}
 		logrus.WithField("beanID", beanID).Trace("Initializing bean")
 		errorValue := initializingMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance)})[0]
