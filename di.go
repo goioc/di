@@ -350,7 +350,7 @@ func initializeInstance(beanID string, instance interface{}) error {
 	initializingBean := reflect.TypeOf((*InitializingBean)(nil)).Elem()
 	bean := reflect.TypeOf(instance)
 	if bean.Implements(initializingBean) {
-		initializingMethod, ok := bean.MethodByName("PostConstruct")
+		initializingMethod, ok := bean.MethodByName(initializingBean.Method(0).Name)
 		if !ok {
 			return errors.New("Unexpected Behavior: Can't find method PostConstruct() in bean " + bean.String())
 		}
