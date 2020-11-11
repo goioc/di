@@ -113,7 +113,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 			"id":              beanID,
 			"registered bean": existingBeanType,
 			"new bean":        beanType,
-		}).Warn("Bean with such ID is already registered, overwriting it")
+		}).Warn("bean with such ID is already registered, overwriting it")
 	}
 	scope, err := getScope(beanType)
 	if err != nil {
@@ -154,7 +154,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 			"id":                beanID,
 			"registered bean":   existingBeanType,
 			"new bean instance": beanType,
-		}).Warn("Bean with such ID is already registered, overwriting it")
+		}).Warn("bean with such ID is already registered, overwriting it")
 	}
 	beans[beanID] = beanType
 	scopes[beanID] = Singleton
@@ -179,7 +179,7 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (int
 		logrus.WithFields(logrus.Fields{
 			"id":              beanID,
 			"registered bean": existingBeanType,
-		}).Warn("Bean with such ID is already registered, overwriting it")
+		}).Warn("bean with such ID is already registered, overwriting it")
 	}
 	scopes[beanID] = beanScope
 	beanFactories[beanID] = beanFactory
@@ -231,7 +231,7 @@ func injectSingletonDependencies() error {
 }
 
 func injectDependencies(beanID string, instance interface{}, chain map[string]bool) error {
-	logrus.WithField("beanID", beanID).Trace("Injecting dependencies")
+	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceType := beans[beanID]
 	instanceElement := instanceType.Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
@@ -264,7 +264,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				return errors.New("invalid di.optional value: " + optional)
 			}
 			if value {
-				logrus.Trace("No dependency found, injecting nil since the dependency marked as optional")
+				logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
 				continue
 			} else {
 				return errors.New("no dependency found")
@@ -295,7 +295,7 @@ func createSingletonInstances() error {
 		logrus.WithFields(logrus.Fields{
 			"beanID": beanID,
 			"scope":  scopes[beanID],
-		}).Trace("Singleton instance created")
+		}).Trace("singleton instance created")
 	}
 	for beanID, beanFactory := range beanFactories {
 		if scopes[beanID] != Singleton {
@@ -312,7 +312,7 @@ func createSingletonInstances() error {
 		logrus.WithFields(logrus.Fields{
 			"beanID": beanID,
 			"scope":  scopes[beanID],
-		}).Trace("Singleton instance created")
+		}).Trace("singleton instance created")
 	}
 	return nil
 }
@@ -330,7 +330,7 @@ func createInstance(beanID string) (interface{}, error) {
 		}
 		return beanInstance, nil
 	}
-	logrus.WithField("beanID", beanID).Trace("Creating instance")
+	logrus.WithField("beanID", beanID).Trace("creating instance")
 	return reflect.New(beans[beanID].Elem()).Interface(), nil
 }
 
@@ -352,14 +352,14 @@ func initializeInstance(beanID string, instance interface{}) error {
 		if !ok {
 			return errors.New("Unexpected Behavior: Can't find method PostConstruct() in bean " + bean.String())
 		}
-		logrus.WithField("beanID", beanID).Trace("Initializing bean")
+		logrus.WithField("beanID", beanID).Trace("initializing bean")
 		errorValue := initializingMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance)})[0]
 		if !errorValue.IsNil() {
 			return errorValue.Elem().Interface().(error)
 		}
 	}
 	if postprocessors, ok := beanPostprocessors[bean]; ok {
-		logrus.WithField("beanID", beanID).Trace("Postprocessing bean")
+		logrus.WithField("beanID", beanID).Trace("postprocessing bean")
 		for _, postprocessor := range postprocessors {
 			if err := postprocessor(instance); err != nil {
 				return err
@@ -402,7 +402,20 @@ func getRequestBeanInstance(beanID string) interface{} {
 	return beanInstance
 }
 
+func isBeanRegistered(beanID string) bool {
+	if _, ok := beans[beanID]; ok {
+		return true
+	}
+	if _, ok := beanFactories[beanID]; ok {
+		return true
+	}
+	return false
+}
+
 func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
+	if !isBeanRegistered(beanID) {
+		return nil, errors.New("bean is not registered: " + beanID)
+	}
 	if scopes[beanID] == Singleton {
 		return singletonInstances[beanID], nil
 	}

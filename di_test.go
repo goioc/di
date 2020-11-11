@@ -77,6 +77,17 @@ func (suite *TestSuite) TestRegisterBeanAfterContainerInitialization() {
 	}
 }
 
+func (suite *TestSuite) TestBeanIsNotRegistered() {
+	err := InitializeContainer()
+	assert.NoError(suite.T(), err)
+	expectedError := errors.New("bean is not registered: someBean")
+	instance, err := GetInstanceSafe("someBean")
+	assert.Nil(suite.T(), instance)
+	if assert.Error(suite.T(), err) {
+		assert.Equal(suite.T(), expectedError, err)
+	}
+}
+
 func (suite *TestSuite) TestBeanFactoryCalledOnce() {
 	var countOfCalls = 0
 	overwritten, err := RegisterBeanFactory("beanId", Singleton, func() (interface{}, error) {
@@ -397,6 +408,52 @@ func (suite *TestSuite) TestRegisterPrototypeBeanFactory() {
 
 type beanWithInjectedBeanFactory struct {
 	BeanFactoryDependency *string `di.inject:"beanFactory"`
+}
+
+func (suite *TestSuite) TestInjectingSlice() {
+	strings := []string{"string0", "string1"}
+	overwritten, err := RegisterBeanInstance("strings", &strings)
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	type BeanWithSlice struct {
+		strings *[]string `di.inject:"strings"`
+	}
+	overwritten, err = RegisterBean("beanWithSlice", reflect.TypeOf((*BeanWithSlice)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	beanWithSlice, err := GetInstanceSafe("beanWithSlice")
+	assert.NotNil(suite.T(), beanWithSlice)
+	assert.NoError(suite.T(), err)
+	stringsOfBean := beanWithSlice.(*BeanWithSlice).strings
+	assert.NotNil(suite.T(), stringsOfBean)
+	assert.Len(suite.T(), *stringsOfBean, 2)
+	assert.Equal(suite.T(), "string0", (*stringsOfBean)[0])
+	assert.Equal(suite.T(), "string1", (*stringsOfBean)[1])
+}
+
+func (suite *TestSuite) TestInjectingMap() {
+	dict := map[string]string{"key0": "value0", "key1": "value1"}
+	overwritten, err := RegisterBeanInstance("dict", &dict)
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	type BeanWithMap struct {
+		dict *map[string]string `di.inject:"dict"`
+	}
+	overwritten, err = RegisterBean("beanWithMap", reflect.TypeOf((*BeanWithMap)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	beanWithMap, err := GetInstanceSafe("beanWithMap")
+	assert.NotNil(suite.T(), beanWithMap)
+	assert.NoError(suite.T(), err)
+	dictOfBean := beanWithMap.(*BeanWithMap).dict
+	assert.NotNil(suite.T(), dictOfBean)
+	assert.Len(suite.T(), *dictOfBean, 2)
+	assert.Equal(suite.T(), "value0", (*dictOfBean)["key0"])
+	assert.Equal(suite.T(), "value1", (*dictOfBean)["key1"])
 }
 
 func (suite *TestSuite) TestInjectingBeanFactory() {
