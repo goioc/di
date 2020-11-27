@@ -795,3 +795,34 @@ func (suite *TestSuite) TestGetBeanScopes() {
 	beansScopes["newBean"] = Singleton
 	assert.Len(suite.T(), GetBeanScopes(), 3)
 }
+
+var closedSingleton = false
+
+type SingletonBeanWithClose struct {
+}
+
+func (sb *SingletonBeanWithClose) Close() error {
+	closedSingleton = true
+	return nil
+}
+
+func (suite *TestSuite) TestShutdown() {
+	bean, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBeanWithClose)(nil)))
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), bean)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	Shutdown()
+	assert.True(suite.T(), closedSingleton)
+}
+
+func (suite *TestSuite) TestShutdownNothingToClose() {
+	type SingletonBean struct {
+	}
+	bean, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), bean)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	Shutdown()
+}
