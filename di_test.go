@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -28,6 +29,8 @@ type TestSuite struct {
 
 func (suite *TestSuite) TearDownTest() {
 	resetContainer()
+	closedSingletons = nil
+	singletonBeansWithErrorOnClose = nil
 }
 
 func TestDITestSuite(t *testing.T) {
@@ -796,14 +799,25 @@ func (suite *TestSuite) TestGetBeanScopes() {
 	assert.Len(suite.T(), GetBeanScopes(), 3)
 }
 
-var closedSingleton = false
+var closedSingletons []bool
 
 type SingletonBeanWithClose struct {
 }
 
 func (sb *SingletonBeanWithClose) Close() error {
-	closedSingleton = true
+	closedSingletons = append(closedSingletons, true)
 	return nil
+}
+
+type SingletonBeanWithErrorOnClose struct {
+}
+
+var singletonBeansWithErrorOnClose []error = nil
+
+func (sb *SingletonBeanWithErrorOnClose) Close() error {
+	err := errors.New("cannot close the bean")
+	singletonBeansWithErrorOnClose = append(singletonBeansWithErrorOnClose, err)
+	return err
 }
 
 func (suite *TestSuite) TestShutdown() {
@@ -812,8 +826,9 @@ func (suite *TestSuite) TestShutdown() {
 	assert.NotNil(suite.T(), bean)
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), 0, len(closedSingletons))
 	Shutdown()
-	assert.True(suite.T(), closedSingleton)
+	assert.True(suite.T(), closedSingletons[0])
 }
 
 func (suite *TestSuite) TestShutdownNothingToClose() {
@@ -825,4 +840,29 @@ func (suite *TestSuite) TestShutdownNothingToClose() {
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
 	Shutdown()
+}
+
+func (suite *TestSuite) TestShutdownErrorOnClose() {
+	_, _ = RegisterBean("singletonBeanWithErrorOnClose", reflect.TypeOf((*SingletonBeanWithErrorOnClose)(nil)))
+	err := InitializeContainer()
+	assert.NoError(suite.T(), err)
+	assert.Nil(suite.T(), singletonBeansWithErrorOnClose)
+	Shutdown()
+	assert.Equal(suite.T(), errors.New("cannot close the bean"), singletonBeansWithErrorOnClose[0])
+}
+
+func (suite *TestSuite) TestShutdownContinueOnError() {
+	//cause of map usage internally in RegisterBean and order is unknown
+	for i := 1; i < 10; i++ {
+		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeOf((*SingletonBeanWithClose)(nil)))
+		i++
+		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeOf((*SingletonBeanWithErrorOnClose)(nil)))
+	}
+	err := InitializeContainer()
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), 0, len(closedSingletons))
+	assert.Equal(suite.T(), 0, len(singletonBeansWithErrorOnClose))
+	Shutdown()
+	assert.Equal(suite.T(), 5, len(closedSingletons))
+	assert.Equal(suite.T(), 5, len(singletonBeansWithErrorOnClose))
 }

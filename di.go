@@ -40,7 +40,7 @@ type Scope string
 
 const (
 	// Singleton is a scope of bean that exists only in one copy in the container and is created at the init-time.
-	// If the bean implements Close() method, then this method will be called on Shutdown (consumer responsibility)
+	// If the bean is singleton and implements Close() method, then this method will be called on Shutdown (consumer responsibility to call Shutdown)
 	Singleton Scope = "singleton"
 	// Prototype is a scope of bean that can exist in multiple copies in the container and is created on demand.
 	Prototype Scope = "prototype"
@@ -479,10 +479,6 @@ func GetBeanScopes() map[string]Scope {
 func Shutdown() {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
-
-	//TODO for userCreatedInstances Close will be called as well, however Close can be called manually - this might have some
-	//		side effects for users
-	//TODO support prototype beans
 
 	for key, value := range singletonInstances {
 		fnc, ok := value.(io.Closer)
