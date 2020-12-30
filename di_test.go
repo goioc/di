@@ -827,7 +827,7 @@ func (suite *TestSuite) TestShutdown() {
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), 0, len(closedSingletons))
-	Shutdown()
+	Close()
 	assert.True(suite.T(), closedSingletons[0])
 }
 
@@ -839,7 +839,7 @@ func (suite *TestSuite) TestShutdownNothingToClose() {
 	assert.NotNil(suite.T(), bean)
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
-	Shutdown()
+	Close()
 }
 
 func (suite *TestSuite) TestShutdownErrorOnClose() {
@@ -847,7 +847,7 @@ func (suite *TestSuite) TestShutdownErrorOnClose() {
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
 	assert.Nil(suite.T(), singletonBeansWithErrorOnClose)
-	Shutdown()
+	Close()
 	assert.Equal(suite.T(), errors.New("cannot close the bean"), singletonBeansWithErrorOnClose[0])
 }
 
@@ -862,7 +862,7 @@ func (suite *TestSuite) TestShutdownContinueOnError() {
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), 0, len(closedSingletons))
 	assert.Equal(suite.T(), 0, len(singletonBeansWithErrorOnClose))
-	Shutdown()
+	Close()
 	assert.Equal(suite.T(), 5, len(closedSingletons))
 	assert.Equal(suite.T(), 5, len(singletonBeansWithErrorOnClose))
 }

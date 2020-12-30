@@ -40,7 +40,7 @@ type Scope string
 
 const (
 	// Singleton is a scope of bean that exists only in one copy in the container and is created at the init-time.
-	// If the bean is singleton and implements Close() method, then this method will be called on Shutdown (consumer responsibility to call Shutdown)
+	// If the bean is singleton and implements Close() method, then this method will be called on Close (consumer responsibility to call Close)
 	Singleton Scope = "singleton"
 	// Prototype is a scope of bean that can exist in multiple copies in the container and is created on demand.
 	Prototype Scope = "prototype"
@@ -58,7 +58,7 @@ type InitializingBean interface {
 
 // DestroyBean is an interface marking beans that need to be destroyed after the container is ready.
 // Note, that order of destroy is not specified
-// This is consumer responsibility to call 'di.Shutdown()'
+// This is consumer responsibility to call 'di.Close()'
 type DestroyBean interface {
 	// PostConstruct method will be called on a bean after the container is initialized.
 	Destroy() error
@@ -473,10 +473,10 @@ func GetBeanScopes() map[string]Scope {
 	return beanScopes
 }
 
-// Shutdown destroys the IoC container - executes io.Closer for all beans which implements it
-// This is responsibility of consumer to call Shutdown method
+// Close destroys the IoC container - executes io.Closer for all beans which implements it
+// This is responsibility of consumer to call Close method
 // if io.Closer returns an error it will just log the error and continue to Close other beans
-func Shutdown() {
+func Close() {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
 
