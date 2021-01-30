@@ -17,6 +17,7 @@ package di
 import (
 	"errors"
 	"github.com/sirupsen/logrus"
+	"io"
 	"reflect"
 	"strconv"
 	"sync"
@@ -24,7 +25,7 @@ import (
 	"unsafe"
 )
 
-var initializeLock sync.Mutex
+var initializeShutdownLock sync.Mutex
 var createInstanceLock sync.Mutex
 var containerInitialized int32
 var beans = make(map[string]reflect.Type)
@@ -39,6 +40,7 @@ type Scope string
 
 const (
 	// Singleton is a scope of bean that exists only in one copy in the container and is created at the init-time.
+	// If the bean is singleton and implements Close() method, then this method will be called on Close (consumer responsibility to call Close)
 	Singleton Scope = "singleton"
 	// Prototype is a scope of bean that can exist in multiple copies in the container and is created on demand.
 	Prototype Scope = "prototype"
@@ -54,6 +56,14 @@ type InitializingBean interface {
 	PostConstruct() error
 }
 
+// DestroyBean is an interface marking beans that need to be destroyed after the container is ready.
+// Note, that order of destroy is not specified
+// This is consumer responsibility to call 'di.Close()'
+type DestroyBean interface {
+	// PostConstruct method will be called on a bean after the container is initialized.
+	Destroy() error
+}
+
 func init() {
 	logrus.SetFormatter(&logrus.TextFormatter{})
 }
@@ -61,8 +71,8 @@ func init() {
 // RegisterBeanPostprocessor function registers postprocessors for beans. Postprocessor is a function that can perform
 // some actions on beans after their creation by the container (and self-initialization with PostConstruct).
 func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean interface{}) error) error {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return errors.New("container is already initialized: can't register bean postprocessor")
 	}
@@ -72,8 +82,8 @@ func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean in
 
 // InitializeContainer function initializes the IoC container.
 func InitializeContainer() error {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return errors.New("container is already initialized: reinitialization is not supported")
 	}
@@ -98,8 +108,8 @@ func InitializeContainer() error {
 // type, e.g.: `reflect.TypeOf((*services.YourService)(nil))`. Return value of `overwritten` is set to `true` if the
 // bean with the same `beanID` has been registered already.
 func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err error) {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return false, errors.New("container is already initialized: can't register new bean")
 	}
@@ -138,8 +148,8 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 // are always `Singleton`. `beanInstance` can only be a reference or an interface. Return value of `overwritten` is set
 // to `true` if the bean with the same `beanID` has been registered already.
 func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten bool, err error) {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return false, errors.New("container is already initialized: can't register new bean")
 	}
@@ -168,8 +178,8 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 // reference or an interface. Return value of `overwritten` is set to `true` if the bean with the same `beanID` has been
 // registered already.
 func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (interface{}, error)) (overwritten bool, err error) {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return false, errors.New("container is already initialized: can't register new bean factory")
 	}
@@ -443,8 +453,8 @@ func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
 // GetBeanTypes returns a map (copy) of beans registered in the Container, omitting bean factories, because their real
 // return type is unknown.
 func GetBeanTypes() map[string]reflect.Type {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
 	beanTypes := make(map[string]reflect.Type)
 	for k, v := range beans {
 		beanTypes[k] = v
@@ -454,8 +464,8 @@ func GetBeanTypes() map[string]reflect.Type {
 
 // GetBeanScopes returns a map (copy) of bean scopes registered in the Container.
 func GetBeanScopes() map[string]Scope {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
 	beanScopes := make(map[string]Scope)
 	for k, v := range scopes {
 		beanScopes[k] = v
@@ -463,9 +473,33 @@ func GetBeanScopes() map[string]Scope {
 	return beanScopes
 }
 
+// Close destroys the IoC container - executes io.Closer for all beans which implements it
+// This is responsibility of consumer to call Close method
+// if io.Closer returns an error it will just log the error and continue to Close other beans
+func Close() {
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
+
+	for key, value := range singletonInstances {
+		fnc, ok := value.(io.Closer)
+		if ok {
+			err := fnc.Close()
+			if err != nil {
+				logrus.WithField("beanID", key).Error(err)
+			}
+		}
+	}
+
+	resetContainerWithoutLock()
+}
+
 func resetContainer() {
-	initializeLock.Lock()
-	defer initializeLock.Unlock()
+	initializeShutdownLock.Lock()
+	defer initializeShutdownLock.Unlock()
+	resetContainerWithoutLock()
+}
+
+func resetContainerWithoutLock() {
 	containerInitialized = 0
 	beans = make(map[string]reflect.Type)
 	beanFactories = make(map[string]func() (interface{}, error))

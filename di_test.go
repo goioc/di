@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -28,6 +29,8 @@ type TestSuite struct {
 
 func (suite *TestSuite) TearDownTest() {
 	resetContainer()
+	closedSingletons = nil
+	singletonBeansWithErrorOnClose = nil
 }
 
 func TestDITestSuite(t *testing.T) {
@@ -794,4 +797,72 @@ func (suite *TestSuite) TestGetBeanScopes() {
 	assert.Equal(suite.T(), Request, beanFactory)
 	beansScopes["newBean"] = Singleton
 	assert.Len(suite.T(), GetBeanScopes(), 3)
+}
+
+var closedSingletons []bool
+
+type SingletonBeanWithClose struct {
+}
+
+func (sb *SingletonBeanWithClose) Close() error {
+	closedSingletons = append(closedSingletons, true)
+	return nil
+}
+
+type SingletonBeanWithErrorOnClose struct {
+}
+
+var singletonBeansWithErrorOnClose []error = nil
+
+func (sb *SingletonBeanWithErrorOnClose) Close() error {
+	err := errors.New("cannot close the bean")
+	singletonBeansWithErrorOnClose = append(singletonBeansWithErrorOnClose, err)
+	return err
+}
+
+func (suite *TestSuite) TestShutdown() {
+	bean, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBeanWithClose)(nil)))
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), bean)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), 0, len(closedSingletons))
+	Close()
+	assert.True(suite.T(), closedSingletons[0])
+}
+
+func (suite *TestSuite) TestShutdownNothingToClose() {
+	type SingletonBean struct {
+	}
+	bean, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), bean)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	Close()
+}
+
+func (suite *TestSuite) TestShutdownErrorOnClose() {
+	_, _ = RegisterBean("singletonBeanWithErrorOnClose", reflect.TypeOf((*SingletonBeanWithErrorOnClose)(nil)))
+	err := InitializeContainer()
+	assert.NoError(suite.T(), err)
+	assert.Nil(suite.T(), singletonBeansWithErrorOnClose)
+	Close()
+	assert.Equal(suite.T(), errors.New("cannot close the bean"), singletonBeansWithErrorOnClose[0])
+}
+
+func (suite *TestSuite) TestShutdownContinueOnError() {
+	//cause of map usage internally in RegisterBean and order is unknown
+	for i := 1; i < 10; i++ {
+		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeOf((*SingletonBeanWithClose)(nil)))
+		i++
+		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeOf((*SingletonBeanWithErrorOnClose)(nil)))
+	}
+	err := InitializeContainer()
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), 0, len(closedSingletons))
+	assert.Equal(suite.T(), 0, len(singletonBeansWithErrorOnClose))
+	Close()
+	assert.Equal(suite.T(), 5, len(closedSingletons))
+	assert.Equal(suite.T(), 5, len(singletonBeansWithErrorOnClose))
 }
