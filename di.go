@@ -56,14 +56,6 @@ type InitializingBean interface {
 	PostConstruct() error
 }
 
-// DestroyBean is an interface marking beans that need to be destroyed after the container is ready.
-// Note, that order of destroy is not specified
-// This is consumer responsibility to call 'di.Close()'
-type DestroyBean interface {
-	// PostConstruct method will be called on a bean after the container is initialized.
-	Destroy() error
-}
-
 func init() {
 	logrus.SetFormatter(&logrus.TextFormatter{})
 }
@@ -473,9 +465,9 @@ func GetBeanScopes() map[string]Scope {
 	return beanScopes
 }
 
-// Close destroys the IoC container - executes io.Closer for all beans which implements it
-// This is responsibility of consumer to call Close method
-// if io.Closer returns an error it will just log the error and continue to Close other beans
+// Close destroys the IoC container - executes io.Closer for all beans which implements it.
+// This is responsibility of consumer to call Close method.
+// If io.Closer returns an error it will just log the error and continue to Close other beans.
 func Close() {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
