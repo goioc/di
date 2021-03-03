@@ -176,6 +176,35 @@ func (pcb *PostConstructBean2) PostConstruct() error {
 }
 ```
 
+### Beans post-processors
+
+The alternative way of initializing beans is using so-called "beans post-processors". Take a look at the example:
+
+```go
+type postprocessedBean struct {
+	a string
+	b string
+}
+
+_, _ := RegisterBean("postprocessedBean", reflect.TypeOf((*postprocessedBean)(nil)))
+
+_ = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
+    instance.(*postprocessedBean).a = "Hello, "
+    return nil
+})
+
+_ = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
+instance.(*postprocessedBean).b = "world!"
+    return nil
+})
+
+_ = InitializeContainer()
+
+instance := GetInstance("postprocessedBean")
+
+postprocessedBean := instance.(*postprocessedBean)
+println(postprocessedBean.a+postprocessedBean.b) // prints out "Hello, world!"
+```
 
 ### Beans injection
 
