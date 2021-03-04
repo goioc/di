@@ -413,7 +413,7 @@ type beanWithInjectedBeanFactory struct {
 	BeanFactoryDependency *string `di.inject:"beanFactory"`
 }
 
-func (suite *TestSuite) TestInjectingSlice() {
+func (suite *TestSuite) TestInjectSlice() {
 	strings := []string{"string0", "string1"}
 	overwritten, err := RegisterBeanInstance("strings", &strings)
 	assert.False(suite.T(), overwritten)
@@ -436,7 +436,7 @@ func (suite *TestSuite) TestInjectingSlice() {
 	assert.Equal(suite.T(), "string1", (*stringsOfBean)[1])
 }
 
-func (suite *TestSuite) TestInjectingMap() {
+func (suite *TestSuite) TestInjectMap() {
 	dict := map[string]string{"key0": "value0", "key1": "value1"}
 	overwritten, err := RegisterBeanInstance("dict", &dict)
 	assert.False(suite.T(), overwritten)
@@ -459,7 +459,7 @@ func (suite *TestSuite) TestInjectingMap() {
 	assert.Equal(suite.T(), "value1", (*dictOfBean)["key1"])
 }
 
-func (suite *TestSuite) TestInjectingBeanFactory() {
+func (suite *TestSuite) TestInjectBeanFactory() {
 	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
 		s := "test"
 		return &s, nil
@@ -694,12 +694,113 @@ func (suite *TestSuite) TestDirectCircularDependency() {
 	}
 }
 
-func (suite *TestSuite) TestRequestBeanInjection() {
+func (suite *TestSuite) TestInjectByTypeNoCandidates() {
+	type OtherBean struct {
+	}
+	type SingletonBean struct {
+		RequestBean *OtherBean `di.inject:""`
+	}
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	expectedError := errors.New("no candidates found for the injection")
+	err = InitializeContainer()
+	if assert.Error(suite.T(), err) {
+		assert.Equal(suite.T(), expectedError, err)
+	}
+}
+
+func (suite *TestSuite) TestInjectByTypeMoreThanOneCandidate() {
+	type OtherBean struct {
+	}
+	type SingletonBean struct {
+		RequestBean *OtherBean `di.inject:""`
+	}
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBeanInstance("candidate1", &OtherBean{})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBeanInstance("candidate2", &OtherBean{})
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	expectedError := errors.New("more then one candidate found for the injection")
+	err = InitializeContainer()
+	if assert.Error(suite.T(), err) {
+		assert.Equal(suite.T(), expectedError, err)
+	}
+}
+
+func (suite *TestSuite) TestInjectByTypeWithType() {
+	type OtherBean struct {
+	}
+	type SingletonBean struct {
+		OtherBean *OtherBean `di.inject:""`
+	}
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*OtherBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("singletonBean")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance.(*SingletonBean).OtherBean)
+}
+
+type someInterface interface {
+	someMethod()
+}
+
+type otherBean struct {
+}
+
+func (o otherBean) someMethod() {
+}
+
+func (suite *TestSuite) TestInjectByTypeWithInterface() {
+	type SingletonBean struct {
+		otherBean someInterface `di.inject:""`
+	}
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*otherBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("singletonBean")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance.(*SingletonBean).otherBean)
+}
+
+func (suite *TestSuite) TestInjectByIDWithInterface() {
+	type SingletonBean struct {
+		otherBean someInterface `di.inject:"otherBean"`
+	}
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*otherBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("singletonBean")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance.(*SingletonBean).otherBean)
+}
+
+func (suite *TestSuite) TestInjectRequestBean() {
 	type RequestBean struct {
 		Scope Scope `di.scope:"request"`
 	}
 	type SingletonBean struct {
-		RequestBean *string `di.inject:"requestBean"`
+		RequestBean *RequestBean `di.inject:"requestBean"`
 	}
 	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)

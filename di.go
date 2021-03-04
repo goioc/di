@@ -124,7 +124,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 	beanTypeElement := beanType.Elem()
 	for i := 0; i < beanTypeElement.NumField(); i++ {
 		field := beanTypeElement.Field(i)
-		if field.Tag.Get("di.inject") == "" {
+		if _, ok := field.Tag.Lookup("di.inject"); !ok {
 			continue
 		}
 		if field.Type.Kind() != reflect.Ptr && field.Type.Kind() != reflect.Interface {
@@ -238,28 +238,34 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 	instanceElement := instanceType.Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
-		beanToInject := field.Tag.Get("di.inject")
-		if beanToInject == "" {
+		beanToInject, ok := field.Tag.Lookup("di.inject")
+		if !ok {
 			continue
 		}
-		beanToInjectType := beans[beanToInject]
 		fieldToInject := reflect.ValueOf(instance).Elem().Field(i)
 		fieldToInject = reflect.NewAt(fieldToInject.Type(), unsafe.Pointer(fieldToInject.UnsafeAddr())).Elem()
 		if fieldToInject.Kind() != reflect.Ptr && fieldToInject.Kind() != reflect.Interface {
 			return errors.New("unsupported dependency type: all injections must be done by reference")
 		}
-		logrus.WithFields(logrus.Fields{
-			"bean":                 beanID,
-			"bean type":            instanceElement,
-			"dependency bean":      beanToInject,
-			"dependency bean type": beanToInjectType,
-		}).Trace("Processing dependency")
-		if scopes[beanToInject] == Request {
-			return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+		if beanToInject == "" { // injecting by type, gotta find the candidate first
+			candidates := findInjectionCandidates(fieldToInject.Type())
+			if len(candidates) < 1 {
+				return errors.New("no candidates found for the injection")
+			}
+			if len(candidates) > 1 {
+				return errors.New("more then one candidate found for the injection")
+			}
+			beanToInject = candidates[0]
 		}
-		_, beanFound := beans[beanToInject]
-		_, beanFactoryFound := beanFactories[beanToInject]
-		if !beanFound && !beanFactoryFound {
+		beanToInjectType := beans[beanToInject]
+		logrus.WithFields(logrus.Fields{
+			"bean":               beanID,
+			"beanType":           instanceElement,
+			"dependencyBean":     beanToInject,
+			"dependencyBeanType": beanToInjectType,
+		}).Trace("processing dependency")
+		scope, beanFound := scopes[beanToInject]
+		if !beanFound {
 			optional := field.Tag.Get("di.optional")
 			value, err := strconv.ParseBool(optional)
 			if optional != "" && err != nil {
@@ -272,6 +278,9 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				return errors.New("no dependency found")
 			}
 		}
+		if scope == Request {
+			return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+		}
 		instanceToInject, err := getInstance(beanToInject, chain)
 		if err != nil {
 			return err
@@ -279,6 +288,16 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		fieldToInject.Set(reflect.ValueOf(instanceToInject))
 	}
 	return nil
+}
+
+func findInjectionCandidates(fieldToInjectType reflect.Type) []string {
+	var candidates []string
+	for beanID, beanType := range beans {
+		if beanType.AssignableTo(fieldToInjectType) {
+			candidates = append(candidates, beanID)
+		}
+	}
+	return candidates
 }
 
 func createSingletonInstances() error {
