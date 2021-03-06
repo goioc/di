@@ -25,16 +25,6 @@ import (
 	"unsafe"
 )
 
-var initializeShutdownLock sync.Mutex
-var createInstanceLock sync.Mutex
-var containerInitialized int32
-var beans = make(map[string]reflect.Type)
-var beanFactories = make(map[string]func() (interface{}, error))
-var scopes = make(map[string]Scope)
-var singletonInstances = make(map[string]interface{})
-var userCreatedInstances = make(map[string]bool)
-var beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
-
 // Scope is a enum for bean scopes supported in this IoC container.
 type Scope string
 
@@ -49,6 +39,25 @@ const (
 	// cancellation.
 	Request Scope = "request"
 )
+
+type tag string
+
+const (
+	scope    tag = "di.scope"
+	inject   tag = "di.inject"
+	optional tag = "di.optional"
+	plural   tag = "di.plural"
+)
+
+var initializeShutdownLock sync.Mutex
+var createInstanceLock sync.Mutex
+var containerInitialized int32
+var beans = make(map[string]reflect.Type)
+var beanFactories = make(map[string]func() (interface{}, error))
+var scopes = make(map[string]Scope)
+var singletonInstances = make(map[string]interface{})
+var userCreatedInstances = make(map[string]bool)
+var beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
 
 // InitializingBean is an interface marking beans that need to be additionally initialized after the container is ready.
 type InitializingBean interface {
@@ -117,14 +126,14 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 			"new bean":        beanType,
 		}).Warn("bean with such ID is already registered, overwriting it")
 	}
-	scope, err := getScope(beanType)
+	beanScope, err := getScope(beanType)
 	if err != nil {
 		return false, err
 	}
 	beanTypeElement := beanType.Elem()
 	for i := 0; i < beanTypeElement.NumField(); i++ {
 		field := beanTypeElement.Field(i)
-		if _, ok := field.Tag.Lookup("di.inject"); !ok {
+		if _, ok := field.Tag.Lookup(string(inject)); !ok {
 			continue
 		}
 		if field.Type.Kind() != reflect.Ptr && field.Type.Kind() != reflect.Interface {
@@ -132,7 +141,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 		}
 	}
 	beans[beanID] = beanType
-	scopes[beanID] = *scope
+	scopes[beanID] = *beanScope
 	return ok, nil
 }
 
@@ -189,12 +198,12 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (int
 }
 
 func getScope(bean reflect.Type) (*Scope, error) {
-	var scope string
+	var beanScope string
 	ok := false
 	beanElement := bean.Elem()
 	for i := 0; i < beanElement.NumField(); i++ {
 		field := beanElement.Field(i)
-		scope, ok = field.Tag.Lookup("di.scope")
+		beanScope, ok = field.Tag.Lookup(string(scope))
 		if ok {
 			break
 		}
@@ -205,7 +214,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 	if !ok {
 		return &singleton, nil
 	}
-	switch scope {
+	switch beanScope {
 	case string(Singleton):
 		return &singleton, nil
 	case string(Prototype):
@@ -213,7 +222,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 	case string(Request):
 		return &request, nil
 	}
-	return nil, errors.New("unsupported scope: " + scope)
+	return nil, errors.New("unsupported scope: " + beanScope)
 }
 
 func injectSingletonDependencies() error {
@@ -238,7 +247,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 	instanceElement := instanceType.Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
-		beanToInject, ok := field.Tag.Lookup("di.inject")
+		beanToInject, ok := field.Tag.Lookup(string(inject))
 		if !ok {
 			continue
 		}
@@ -264,12 +273,12 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			"dependencyBean":     beanToInject,
 			"dependencyBeanType": beanToInjectType,
 		}).Trace("processing dependency")
-		scope, beanFound := scopes[beanToInject]
+		beanScope, beanFound := scopes[beanToInject]
 		if !beanFound {
-			optional := field.Tag.Get("di.optional")
-			value, err := strconv.ParseBool(optional)
-			if optional != "" && err != nil {
-				return errors.New("invalid di.optional value: " + optional)
+			optionalTag := field.Tag.Get(string(optional))
+			value, err := strconv.ParseBool(optionalTag)
+			if optionalTag != "" && err != nil {
+				return errors.New("invalid di.optional value: " + optionalTag)
 			}
 			if value {
 				logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
@@ -278,7 +287,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				return errors.New("no dependency found")
 			}
 		}
-		if scope == Request {
+		if beanScope == Request {
 			return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
 		}
 		instanceToInject, err := getInstance(beanToInject, chain)

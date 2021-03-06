@@ -837,7 +837,7 @@ func (suite *TestSuite) TestRequestBeanRetrieval() {
 
 func (suite *TestSuite) TestFailRequestBeanRetrieval() {
 	overwritten, err := RegisterBeanFactory("requestBean", Request, func() (interface{}, error) {
-		return nil, errors.New("Cannot initialize request bean")
+		return nil, errors.New("cannot initialize request bean")
 	})
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
