@@ -208,7 +208,7 @@ println(postprocessedBean.a+postprocessedBean.b) // prints out "Hello, world!"
 
 ### Beans injection
 
-As was mentioned above, one bean can be injected into another with the `PostConstruct` method. But the more handy way of doing it is by using a special tag:
+As was mentioned above, one bean can be injected into another with the `PostConstruct` method. However, the more handy way of doing it is by using a special tag:
 
 ```go
 type SingletonBean struct {
@@ -224,9 +224,9 @@ type SingletonBean struct {
 }
 ```
 
-Note that you can refer depepndencies either by pointer, or by interface, but not by value. And just a reminder: you can't inject `Request` beans.
+Note that you can refer dependencies either by pointer, or by interface, but not by value. And just a reminder: you can't inject `Request` beans.
 
-Sometimes we might want to have optional dependencies. By default, all declared depepndencies are considered to be requred: if some dependency is not found in the Container, you will get an error. But you can specify an optional dependency like this:
+Sometimes we might want to have optional dependencies. By default, all declared dependencies are considered to be required: if some dependency is not found in the Container, you will get an error. However, you can specify an optional dependency like this:
 
 ```go
 type SingletonBean struct {
@@ -235,6 +235,17 @@ type SingletonBean struct {
 ```
 
 In this case, if `someOtherBean` is not found in the Container, you will get `nill` injected into this field.
+
+Finally, you don't need a bean ID to preform an injection! Check this out:
+
+```go
+type SingletonBean struct {
+	SomeOtherBean *string `di.inject:""`
+}
+```
+
+In this case, DI will try to find a candidate for the injection automatically (among registered beans of type `*string`). Cool, ain't it? 🤠
+It will panic though if no candidates are found (and if the dependency is not marked as optional), or if there is more than one candidates found. 
 
 ### Circular dependencies
 
