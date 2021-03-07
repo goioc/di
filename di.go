@@ -311,11 +311,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			for i, beanToInject := range candidates {
 				beanToInjectType := beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-				beanScope, beanFound := scopes[beanToInject]
-				if !beanFound {
-					continue
-				}
-				if beanScope == Request {
+				if scopes[beanToInject] == Request {
 					return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
 				}
 				instanceToInject, err := getInstance(beanToInject, chain)
@@ -339,11 +335,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			for _, beanToInject := range candidates {
 				beanToInjectType := beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-				beanScope, beanFound := scopes[beanToInject]
-				if !beanFound {
-					continue
-				}
-				if beanScope == Request {
+				if scopes[beanToInject] == Request {
 					return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
 				}
 				instanceToInject, err := getInstance(beanToInject, chain)
