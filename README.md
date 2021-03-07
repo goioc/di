@@ -251,13 +251,13 @@ Finally, you can inject beans to slices and maps. It works similarly to the ID-l
 
 ```go
 type SingletonBean struct {
-	SomeOtherBean []*string `di.inject:""`
+	someOtherBeans []*string `di.inject:""`
 }
 ```
 
 ```go
 type SingletonBean struct {
-	SomeOtherBean map[string]*string `di.inject:""`
+	someOtherBeans map[string]*string `di.inject:""`
 }
 ```
 
