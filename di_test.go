@@ -968,7 +968,7 @@ func (suite *TestSuite) TestInjectRequestBean() {
 	overwritten, err = RegisterBean("requestBean", reflect.TypeOf((*RequestBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+	expectedError := errors.New(RequestScopedBeansCantBeInjected)
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)

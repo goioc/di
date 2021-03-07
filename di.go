@@ -49,7 +49,9 @@ const (
 )
 
 const (
-	UnsupportedDependencyType string = "unsupported dependency type: all injections must be done by pointer, interface, slice or map"
+	UnsupportedDependencyType        string = "unsupported dependency type: all injections must be done by pointer, interface, slice or map"
+	BeanAlreadyRegistered            string = "bean with such ID is already registered, overwriting it"
+	RequestScopedBeansCantBeInjected        = "request-scoped beans can't be injected: they can only be retrieved from the web-context"
 )
 
 var initializeShutdownLock sync.Mutex
@@ -127,7 +129,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 			"id":              beanID,
 			"registered bean": existingBeanType,
 			"new bean":        beanType,
-		}).Warn("bean with such ID is already registered, overwriting it")
+		}).Warn(BeanAlreadyRegistered)
 	}
 	beanScope, err := getScope(beanType)
 	if err != nil {
@@ -169,7 +171,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 			"id":                beanID,
 			"registered bean":   existingBeanType,
 			"new bean instance": beanType,
-		}).Warn("bean with such ID is already registered, overwriting it")
+		}).Warn(BeanAlreadyRegistered)
 	}
 	beans[beanID] = beanType
 	scopes[beanID] = Singleton
@@ -194,7 +196,7 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (int
 		logrus.WithFields(logrus.Fields{
 			"id":              beanID,
 			"registered bean": existingBeanType,
-		}).Warn("bean with such ID is already registered, overwriting it")
+		}).Warn(BeanAlreadyRegistered)
 	}
 	scopes[beanID] = beanScope
 	beanFactories[beanID] = beanFactory
@@ -289,7 +291,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				}
 			}
 			if beanScope == Request {
-				return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+				return errors.New(RequestScopedBeansCantBeInjected)
 			}
 			instanceToInject, err := getInstance(beanToInject, chain)
 			if err != nil {
@@ -312,7 +314,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				beanToInjectType := beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
 				if scopes[beanToInject] == Request {
-					return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+					return errors.New(RequestScopedBeansCantBeInjected)
 				}
 				instanceToInject, err := getInstance(beanToInject, chain)
 				if err != nil {
@@ -336,7 +338,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				beanToInjectType := beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
 				if scopes[beanToInject] == Request {
-					return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+					return errors.New(RequestScopedBeansCantBeInjected)
 				}
 				instanceToInject, err := getInstance(beanToInject, chain)
 				if err != nil {
