@@ -278,12 +278,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				beanToInject = candidates[0]
 			}
 			beanToInjectType := beans[beanToInject]
-			logrus.WithFields(logrus.Fields{
-				"bean":               beanID,
-				"beanType":           instanceElement,
-				"dependencyBean":     beanToInject,
-				"dependencyBeanType": beanToInjectType,
-			}).Trace("processing dependency")
+			logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
 			beanScope, beanFound := scopes[beanToInject]
 			if !beanFound {
 				if optionalDependency {
@@ -302,14 +297,75 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			}
 			fieldToInject.Set(reflect.ValueOf(instanceToInject))
 		case reflect.Slice:
-
+			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
+				return errors.New(UnsupportedDependencyType)
+			}
+			candidates := findInjectionCandidates(fieldToInject.Type().Elem())
+			if len(candidates) < 1 {
+				if !optionalDependency {
+					fieldToInject.Set(reflect.MakeSlice(fieldToInject.Type(), 0, 0))
+				}
+				continue
+			}
+			fieldToInject.Set(reflect.MakeSlice(fieldToInject.Type(), len(candidates), len(candidates)))
+			for i, beanToInject := range candidates {
+				beanToInjectType := beans[beanToInject]
+				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
+				beanScope, beanFound := scopes[beanToInject]
+				if !beanFound {
+					continue
+				}
+				if beanScope == Request {
+					return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+				}
+				instanceToInject, err := getInstance(beanToInject, chain)
+				if err != nil {
+					return err
+				}
+				fieldToInject.Index(i).Set(reflect.ValueOf(instanceToInject))
+			}
 		case reflect.Map:
-
+			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
+				return errors.New(UnsupportedDependencyType)
+			}
+			candidates := findInjectionCandidates(fieldToInject.Type().Elem())
+			if len(candidates) < 1 {
+				if !optionalDependency {
+					fieldToInject.Set(reflect.MakeMap(fieldToInject.Type()))
+				}
+				continue
+			}
+			fieldToInject.Set(reflect.MakeMap(fieldToInject.Type()))
+			for _, beanToInject := range candidates {
+				beanToInjectType := beans[beanToInject]
+				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
+				beanScope, beanFound := scopes[beanToInject]
+				if !beanFound {
+					continue
+				}
+				if beanScope == Request {
+					return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+				}
+				instanceToInject, err := getInstance(beanToInject, chain)
+				if err != nil {
+					return err
+				}
+				fieldToInject.SetMapIndex(reflect.ValueOf(beanToInject), reflect.ValueOf(instanceToInject))
+			}
 		default:
 			return errors.New(UnsupportedDependencyType)
 		}
 	}
 	return nil
+}
+
+func logInjection(beanID string, instanceElement reflect.Type, beanToInject string, beanToInjectType reflect.Type) {
+	logrus.WithFields(logrus.Fields{
+		"bean":               beanID,
+		"beanType":           instanceElement,
+		"dependencyBean":     beanToInject,
+		"dependencyBeanType": beanToInjectType,
+	}).Trace("processing dependency")
 }
 
 func isOptional(field reflect.StructField) (bool, error) {
