@@ -458,7 +458,7 @@ func initializeInstance(beanID string, instance interface{}) error {
 	if bean.Implements(initializingBean) {
 		initializingMethod, ok := bean.MethodByName(initializingBean.Method(0).Name)
 		if !ok {
-			return errors.New("Unexpected Behavior: Can't find method PostConstruct() in bean " + bean.String())
+			return errors.New("unexpected behavior: can't find method PostConstruct() in bean " + bean.String())
 		}
 		logrus.WithField("beanID", beanID).Trace("initializing bean")
 		errorValue := initializingMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance)})[0]
