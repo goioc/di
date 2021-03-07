@@ -182,7 +182,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanNonReferenceDependency() {
 	type SingletonBean struct {
 		SomeOtherBean string `di.inject:"someOtherBean"`
 	}
-	expectedError := errors.New("unsupported dependency type: all injections must be done by reference")
+	expectedError := errors.New(UnsupportedDependencyType)
 	overwritten, err := RegisterBean("", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
@@ -694,11 +694,11 @@ func (suite *TestSuite) TestDirectCircularDependency() {
 	}
 }
 
-func (suite *TestSuite) TestInjectByTypeNoCandidates() {
+func (suite *TestSuite) TestInjectByTypeNoCandidatesMandatory() {
 	type OtherBean struct {
 	}
 	type SingletonBean struct {
-		RequestBean *OtherBean `di.inject:""`
+		OtherBean *OtherBean `di.inject:""`
 	}
 	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
@@ -708,6 +708,22 @@ func (suite *TestSuite) TestInjectByTypeNoCandidates() {
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
+}
+
+func (suite *TestSuite) TestInjectByTypeNoCandidatesOptional() {
+	type OtherBean struct {
+	}
+	type SingletonBean struct {
+		OtherBean *OtherBean `di.inject:"" di.optional:"true"`
+	}
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("singletonBean")
+	assert.NoError(suite.T(), err)
+	assert.Nil(suite.T(), instance.(*SingletonBean).OtherBean)
 }
 
 func (suite *TestSuite) TestInjectByTypeMoreThanOneCandidate() {

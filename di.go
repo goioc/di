@@ -46,7 +46,10 @@ const (
 	scope    tag = "di.scope"
 	inject   tag = "di.inject"
 	optional tag = "di.optional"
-	plural   tag = "di.plural"
+)
+
+const (
+	UnsupportedDependencyType string = "unsupported dependency type: all injections must be done by pointer, interface, slice or map"
 )
 
 var initializeShutdownLock sync.Mutex
@@ -136,8 +139,9 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 		if _, ok := field.Tag.Lookup(string(inject)); !ok {
 			continue
 		}
-		if field.Type.Kind() != reflect.Ptr && field.Type.Kind() != reflect.Interface {
-			return false, errors.New("unsupported dependency type: all injections must be done by reference")
+		if field.Type.Kind() != reflect.Ptr && field.Type.Kind() != reflect.Interface &&
+			field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Map {
+			return false, errors.New(UnsupportedDependencyType)
 		}
 	}
 	beans[beanID] = beanType
@@ -251,52 +255,70 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		if !ok {
 			continue
 		}
-		fieldToInject := reflect.ValueOf(instance).Elem().Field(i)
-		fieldToInject = reflect.NewAt(fieldToInject.Type(), unsafe.Pointer(fieldToInject.UnsafeAddr())).Elem()
-		if fieldToInject.Kind() != reflect.Ptr && fieldToInject.Kind() != reflect.Interface {
-			return errors.New("unsupported dependency type: all injections must be done by reference")
-		}
-		if beanToInject == "" { // injecting by type, gotta find the candidate first
-			candidates := findInjectionCandidates(fieldToInject.Type())
-			if len(candidates) < 1 {
-				return errors.New("no candidates found for the injection")
-			}
-			if len(candidates) > 1 {
-				return errors.New("more then one candidate found for the injection")
-			}
-			beanToInject = candidates[0]
-		}
-		beanToInjectType := beans[beanToInject]
-		logrus.WithFields(logrus.Fields{
-			"bean":               beanID,
-			"beanType":           instanceElement,
-			"dependencyBean":     beanToInject,
-			"dependencyBeanType": beanToInjectType,
-		}).Trace("processing dependency")
-		beanScope, beanFound := scopes[beanToInject]
-		if !beanFound {
-			optionalTag := field.Tag.Get(string(optional))
-			value, err := strconv.ParseBool(optionalTag)
-			if optionalTag != "" && err != nil {
-				return errors.New("invalid di.optional value: " + optionalTag)
-			}
-			if value {
-				logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
-				continue
-			} else {
-				return errors.New("no dependency found")
-			}
-		}
-		if beanScope == Request {
-			return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
-		}
-		instanceToInject, err := getInstance(beanToInject, chain)
+		optionalDependency, err := isOptional(field)
 		if err != nil {
 			return err
 		}
-		fieldToInject.Set(reflect.ValueOf(instanceToInject))
+		fieldToInject := reflect.ValueOf(instance).Elem().Field(i)
+		fieldToInject = reflect.NewAt(fieldToInject.Type(), unsafe.Pointer(fieldToInject.UnsafeAddr())).Elem()
+		switch fieldToInject.Kind() {
+		case reflect.Ptr, reflect.Interface:
+			if beanToInject == "" { // injecting by type, gotta find the candidate first
+				candidates := findInjectionCandidates(fieldToInject.Type())
+				if len(candidates) < 1 {
+					if optionalDependency {
+						continue
+					} else {
+						return errors.New("no candidates found for the injection")
+					}
+				}
+				if len(candidates) > 1 {
+					return errors.New("more then one candidate found for the injection")
+				}
+				beanToInject = candidates[0]
+			}
+			beanToInjectType := beans[beanToInject]
+			logrus.WithFields(logrus.Fields{
+				"bean":               beanID,
+				"beanType":           instanceElement,
+				"dependencyBean":     beanToInject,
+				"dependencyBeanType": beanToInjectType,
+			}).Trace("processing dependency")
+			beanScope, beanFound := scopes[beanToInject]
+			if !beanFound {
+				if optionalDependency {
+					logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
+					continue
+				} else {
+					return errors.New("no dependency found")
+				}
+			}
+			if beanScope == Request {
+				return errors.New("request-scoped beans can't be injected: they can only be retrieved from the web-context")
+			}
+			instanceToInject, err := getInstance(beanToInject, chain)
+			if err != nil {
+				return err
+			}
+			fieldToInject.Set(reflect.ValueOf(instanceToInject))
+		case reflect.Slice:
+
+		case reflect.Map:
+
+		default:
+			return errors.New(UnsupportedDependencyType)
+		}
 	}
 	return nil
+}
+
+func isOptional(field reflect.StructField) (bool, error) {
+	optionalTag := field.Tag.Get(string(optional))
+	value, err := strconv.ParseBool(optionalTag)
+	if optionalTag != "" && err != nil {
+		return false, errors.New("invalid di.optional value: " + optionalTag)
+	}
+	return value, nil
 }
 
 func findInjectionCandidates(fieldToInjectType reflect.Type) []string {
