@@ -236,7 +236,7 @@ type SingletonBean struct {
 
 In this case, if `someOtherBean` is not found in the Container, you will get `nill` injected into this field.
 
-Finally, you don't need a bean ID to preform an injection! Check this out:
+In fact, you don't need a bean ID to preform an injection! Check this out:
 
 ```go
 type SingletonBean struct {
@@ -246,6 +246,20 @@ type SingletonBean struct {
 
 In this case, DI will try to find a candidate for the injection automatically (among registered beans of type `*string`). Cool, ain't it? 🤠
 It will panic though if no candidates are found (and if the dependency is not marked as optional), or if there is more than one candidates found. 
+
+Finally, you can inject beans to slices and maps. It works similarly to the ID-less inections above, but injects all candidates that were found:
+
+```go
+type SingletonBean struct {
+	SomeOtherBean []*string `di.inject:""`
+}
+```
+
+```go
+type SingletonBean struct {
+	SomeOtherBean map[string]*string `di.inject:""`
+}
+```
 
 ### Circular dependencies
 
