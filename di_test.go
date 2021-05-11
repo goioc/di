@@ -15,6 +15,7 @@
 package di
 
 import (
+	"context"
 	"errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
@@ -93,7 +94,7 @@ func (suite *TestSuite) TestBeanIsNotRegistered() {
 
 func (suite *TestSuite) TestBeanFactoryCalledOnce() {
 	var countOfCalls = 0
-	overwritten, err := RegisterBeanFactory("beanId", Singleton, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("beanId", Singleton, func(context.Context) (interface{}, error) {
 		countOfCalls++
 		return new(string), nil
 	})
@@ -138,7 +139,7 @@ func (suite *TestSuite) TestRegisterNonReferenceBeanInstance() {
 }
 
 func (suite *TestSuite) TestRegisterNonReferenceSingletonBeanFactory() {
-	overwritten, err := RegisterBeanFactory("", Singleton, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("", Singleton, func(context.Context) (interface{}, error) {
 		return "", nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -151,7 +152,7 @@ func (suite *TestSuite) TestRegisterNonReferenceSingletonBeanFactory() {
 }
 
 func (suite *TestSuite) TestRegisterNonReferencePrototypeBeanFactory() {
-	overwritten, err := RegisterBeanFactory("", Prototype, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("", Prototype, func(context.Context) (interface{}, error) {
 		return "", nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -331,7 +332,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanInstance() {
 }
 
 func (suite *TestSuite) TestRegisterSingletonBeanFactoryWithError() {
-	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func(context.Context) (interface{}, error) {
 		return nil, errors.New("error in the bean factory")
 	})
 	assert.False(suite.T(), overwritten)
@@ -344,7 +345,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanFactoryWithError() {
 }
 
 func (suite *TestSuite) TestRegisterSingletonBeanFactory() {
-	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func(context.Context) (interface{}, error) {
 		return new(string), nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -381,7 +382,7 @@ func (suite *TestSuite) TestRegisterPrototypeBean() {
 }
 
 func (suite *TestSuite) TestRegisterPrototypeBeanFactoryWithError() {
-	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func(context.Context) (interface{}, error) {
 		return nil, errors.New("error in the bean factory")
 	})
 	assert.False(suite.T(), overwritten)
@@ -397,7 +398,7 @@ func (suite *TestSuite) TestRegisterPrototypeBeanFactoryWithError() {
 }
 
 func (suite *TestSuite) TestRegisterPrototypeBeanFactory() {
-	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func(context.Context) (interface{}, error) {
 		return new(string), nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -460,7 +461,7 @@ func (suite *TestSuite) TestInjectMap() {
 }
 
 func (suite *TestSuite) TestInjectBeanFactory() {
-	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func(context.Context) (interface{}, error) {
 		s := "test"
 		return &s, nil
 	})
@@ -484,7 +485,7 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromBeanToBeanFact
 	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBeanFactory("bean", Singleton, func() (interface{}, error) {
+	overwritten, err = RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
 		s := "test_overwritten"
 		return &s, nil
 	})
@@ -505,7 +506,7 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromPrototypeToSin
 	overwritten, err := RegisterBean("bean", reflect.TypeOf((*PrototypeBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBeanFactory("bean", Singleton, func() (interface{}, error) {
+	overwritten, err = RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
 		s := "test_overwritten"
 		return &s, nil
 	})
@@ -524,7 +525,7 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromPrototypeToSin
 }
 
 func (suite *TestSuite) TestBeanFunction() {
-	overwritten, err := RegisterBeanFactory("beanFunction", Singleton, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("beanFunction", Singleton, func(context.Context) (interface{}, error) {
 		f := func(x int) int {
 			return x + 42
 		}
@@ -996,7 +997,7 @@ func (suite *TestSuite) TestRequestBeanRetrieval() {
 }
 
 func (suite *TestSuite) TestFailRequestBeanRetrieval() {
-	overwritten, err := RegisterBeanFactory("requestBean", Request, func() (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("requestBean", Request, func(context.Context) (interface{}, error) {
 		return nil, errors.New("cannot initialize request bean")
 	})
 	assert.False(suite.T(), overwritten)
@@ -1004,8 +1005,45 @@ func (suite *TestSuite) TestFailRequestBeanRetrieval() {
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
 	assert.Panics(suite.T(), func() {
-		getRequestBeanInstance("requestBean")
+		getRequestBeanInstance(context.Background(), "requestBean")
 	})
+}
+
+type contextAwareBean struct {
+	ctx context.Context
+}
+
+func (cab *contextAwareBean) SetContext(ctx context.Context) {
+	cab.ctx = ctx
+}
+
+func (suite *TestSuite) TestContextAwareBean() {
+	overwritten, err := RegisterBean("contextAwareBean", reflect.TypeOf((*contextAwareBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("contextAwareBean")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance)
+	assert.Equal(suite.T(), context.Background(), instance.(*contextAwareBean).ctx)
+}
+
+func (suite *TestSuite) TestContextAwareBeanFactory() {
+	var outerCtx context.Context
+	overwritten, err := RegisterBeanFactory("beanId", Singleton, func(ctx context.Context) (interface{}, error) {
+		outerCtx = ctx
+		return new(string), nil
+	})
+	assert.False(suite.T(), overwritten)
+	assert.Nil(suite.T(), err)
+	err = InitializeContainer()
+	assert.False(suite.T(), overwritten)
+	assert.Nil(suite.T(), err)
+	instance, err := GetInstanceSafe("beanId")
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), instance)
+	assert.Equal(suite.T(), context.Background(), outerCtx)
 }
 
 func (suite *TestSuite) TestGetBeanTypes() {
@@ -1040,7 +1078,7 @@ func (suite *TestSuite) TestGetBeanScopes() {
 	overwritten, err = RegisterBeanInstance("beanInstance", new(string))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBeanFactory("beanFactory", Request, func() (interface{}, error) {
+	overwritten, err = RegisterBeanFactory("beanFactory", Request, func(context.Context) (interface{}, error) {
 		return new(string), nil
 	})
 	assert.False(suite.T(), overwritten)

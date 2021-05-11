@@ -136,16 +136,17 @@ For this type of beans, the only supported scope is `Singleton`, because I don't
 
 - **Via bean factory**. If you have a method that is producing instances for you, you can register it as a bean factory:
 ```go
-di.RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
+di.RegisterBeanFactory("beanID", Singleton, func(context.Context) (interface{}, error) {
 		return "My awesome string that is going to become a bean!", nil
 	})
 ```
 Feel free to use any scope with this method. By the way, you can even lookup other beans within the factory:
 ```go
-di.RegisterBeanFactory("beanID", Singleton, func() (interface{}, error) {
+di.RegisterBeanFactory("beanID", Singleton, func(context.Context) (interface{}, error) {
 		return di.GetInstance("someOtherBeanID"), nil
 	})
 ```
+Note that factory-method accepts `context.Context`. It can be useful for request-scoped beans (the HTTP request context is set in this case). For all other beans it will be `context.Background()`.
 
 ### Beans initialization
 
@@ -354,16 +355,16 @@ func init() {
 	_, _ = di.RegisterBean("weatherService", reflect.TypeOf((*services.WeatherService)(nil)))
 	_, _ = di.RegisterBean("indexController", reflect.TypeOf((*controllers.IndexController)(nil)))
 	_, _ = di.RegisterBean("weatherController", reflect.TypeOf((*controllers.WeatherController)(nil)))
-	_, _ = di.RegisterBeanFactory("db", di.Singleton, func() (interface{}, error) {
+	_, _ = di.RegisterBeanFactory("db", di.Singleton, func(context.Context) (interface{}, error) {
 		_ = os.Remove("./di-demo.db")
 		db, _ := sql.Open("sqlite3", "./di-demo.db")
 		db.SetMaxOpenConns(1)
 		_, _ = db.Exec("create table log ('city' varchar not null, 'ip' varchar not null, 'time' datetime not null)")
 		return db, nil
 	})
-	_, _ = di.RegisterBeanFactory("dbConnection", di.Request, func() (interface{}, error) {
+	_, _ = di.RegisterBeanFactory("dbConnection", di.Request, func(ctx context.Context) (interface{}, error) {
 		db, _ := di.GetInstanceSafe("db")
-		return db.(*sql.DB).Conn(context.TODO())
+		return db.(*sql.DB).Conn(ctx)
 	})
 	_ = di.InitializeContainer()
 }

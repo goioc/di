@@ -15,6 +15,7 @@
 package di
 
 import (
+	"context"
 	"errors"
 	"github.com/sirupsen/logrus"
 	"io"
@@ -49,16 +50,16 @@ const (
 )
 
 const (
-	UnsupportedDependencyType        string = "unsupported dependency type: all injections must be done by pointer, interface, slice or map"
-	BeanAlreadyRegistered            string = "bean with such ID is already registered, overwriting it"
-	RequestScopedBeansCantBeInjected        = "request-scoped beans can't be injected: they can only be retrieved from the web-context"
+	UnsupportedDependencyType        = "unsupported dependency type: all injections must be done by pointer, interface, slice or map"
+	BeanAlreadyRegistered            = "bean with such ID is already registered, overwriting it"
+	RequestScopedBeansCantBeInjected = "request-scoped beans can't be injected: they can only be retrieved from the web-context"
 )
 
 var initializeShutdownLock sync.Mutex
 var createInstanceLock sync.Mutex
 var containerInitialized int32
 var beans = make(map[string]reflect.Type)
-var beanFactories = make(map[string]func() (interface{}, error))
+var beanFactories = make(map[string]func(context.Context) (interface{}, error))
 var scopes = make(map[string]Scope)
 var singletonInstances = make(map[string]interface{})
 var userCreatedInstances = make(map[string]bool)
@@ -68,6 +69,13 @@ var beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
 type InitializingBean interface {
 	// PostConstruct method will be called on a bean after the container is initialized.
 	PostConstruct() error
+}
+
+// ContextAwareBean is an interface marking beans that can accept context. Mostly meant to be used with Request-scoped
+// beans (HTTP request context will be propagated for them). For all other beans it's gonna be `context.Background()`.
+type ContextAwareBean interface {
+	// SetContext method will be called on a bean after its creation.
+	SetContext(ctx context.Context)
 }
 
 func init() {
@@ -184,7 +192,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 // create an instance of this bean. `beanScope` can be any scope of the supported ones. `beanFactory` can only produce a
 // reference or an interface. Return value of `overwritten` is set to `true` if the bean with the same `beanID` has been
 // registered already.
-func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func() (interface{}, error)) (overwritten bool, err error) {
+func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx context.Context) (interface{}, error)) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
@@ -293,7 +301,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			if beanScope == Request {
 				return errors.New(RequestScopedBeansCantBeInjected)
 			}
-			instanceToInject, err := getInstance(beanToInject, chain)
+			instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
 			if err != nil {
 				return err
 			}
@@ -316,7 +324,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if scopes[beanToInject] == Request {
 					return errors.New(RequestScopedBeansCantBeInjected)
 				}
-				instanceToInject, err := getInstance(beanToInject, chain)
+				instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
 				if err != nil {
 					return err
 				}
@@ -340,7 +348,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if scopes[beanToInject] == Request {
 					return errors.New(RequestScopedBeansCantBeInjected)
 				}
-				instanceToInject, err := getInstance(beanToInject, chain)
+				instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
 				if err != nil {
 					return err
 				}
@@ -389,7 +397,7 @@ func createSingletonInstances() error {
 		if _, ok := userCreatedInstances[beanID]; ok {
 			continue
 		}
-		instance, err := createInstance(beanID)
+		instance, err := createInstance(context.Background(), beanID)
 		if err != nil {
 			return err
 		}
@@ -403,7 +411,7 @@ func createSingletonInstances() error {
 		if scopes[beanID] != Singleton {
 			continue
 		}
-		beanInstance, err := beanFactory()
+		beanInstance, err := beanFactory(context.Background())
 		if err != nil {
 			return err
 		}
@@ -419,11 +427,11 @@ func createSingletonInstances() error {
 	return nil
 }
 
-func createInstance(beanID string) (interface{}, error) {
+func createInstance(ctx context.Context, beanID string) (interface{}, error) {
 	createInstanceLock.Lock()
 	defer createInstanceLock.Unlock()
 	if beanFactory, ok := beanFactories[beanID]; ok {
-		beanInstance, err := beanFactory()
+		beanInstance, err := beanFactory(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -439,6 +447,10 @@ func createInstance(beanID string) (interface{}, error) {
 func initializeSingletonInstances() error {
 	for beanID, instance := range singletonInstances {
 		err := initializeInstance(beanID, instance)
+		if err != nil {
+			return err
+		}
+		err = setContext(context.Background(), beanID, instance)
 		if err != nil {
 			return err
 		}
@@ -471,6 +483,20 @@ func initializeInstance(beanID string, instance interface{}) error {
 	return nil
 }
 
+func setContext(ctx context.Context, beanID string, instance interface{}) error {
+	contextAwareBean := reflect.TypeOf((*ContextAwareBean)(nil)).Elem()
+	bean := reflect.TypeOf(instance)
+	if bean.Implements(contextAwareBean) {
+		setContextMethod, ok := bean.MethodByName(contextAwareBean.Method(0).Name)
+		if !ok {
+			return errors.New("unexpected behavior: can't find method SetContext() in bean " + bean.String())
+		}
+		logrus.WithField("beanID", beanID).WithField("context", ctx).Trace("setting context to bean")
+		setContextMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance), reflect.ValueOf(ctx)})
+	}
+	return nil
+}
+
 // GetInstance function returns bean instance by its ID. It may panic, so if receiving the error in return is preferred,
 // consider using `GetInstanceSafe`.
 func GetInstance(beanID string) interface{} {
@@ -490,14 +516,14 @@ func GetInstanceSafe(beanID string) (interface{}, error) {
 	if scopes[beanID] == Request {
 		return nil, errors.New("request-scoped beans can't be retrieved directly from the container: they can only be retrieved from the web-context")
 	}
-	return getInstance(beanID, make(map[string]bool))
+	return getInstance(context.Background(), beanID, make(map[string]bool))
 }
 
-func getRequestBeanInstance(beanID string) interface{} {
+func getRequestBeanInstance(ctx context.Context, beanID string) interface{} {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		panic("container is not initialized: can't lookup instances of beans yet")
 	}
-	beanInstance, err := getInstance(beanID, make(map[string]bool))
+	beanInstance, err := getInstance(ctx, beanID, make(map[string]bool))
 	if err != nil {
 		panic(err)
 	}
@@ -514,7 +540,7 @@ func isBeanRegistered(beanID string) bool {
 	return false
 }
 
-func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
+func getInstance(ctx context.Context, beanID string, chain map[string]bool) (interface{}, error) {
 	if !isBeanRegistered(beanID) {
 		return nil, errors.New("bean is not registered: " + beanID)
 	}
@@ -525,7 +551,7 @@ func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
 		return nil, errors.New("circular dependency detected for bean: " + beanID)
 	}
 	chain[beanID] = true
-	instance, err := createInstance(beanID)
+	instance, err := createInstance(ctx, beanID)
 	if err != nil {
 		return nil, err
 	}
@@ -536,6 +562,10 @@ func getInstance(beanID string, chain map[string]bool) (interface{}, error) {
 		}
 	}
 	err = initializeInstance(beanID, instance)
+	if err != nil {
+		return nil, err
+	}
+	err = setContext(ctx, beanID, instance)
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +624,7 @@ func resetContainer() {
 func resetContainerWithoutLock() {
 	containerInitialized = 0
 	beans = make(map[string]reflect.Type)
-	beanFactories = make(map[string]func() (interface{}, error))
+	beanFactories = make(map[string]func(context.Context) (interface{}, error))
 	scopes = make(map[string]Scope)
 	singletonInstances = make(map[string]interface{})
 	userCreatedInstances = make(map[string]bool)

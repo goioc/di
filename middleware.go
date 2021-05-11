@@ -28,13 +28,13 @@ type BeanKey string
 // cancellation (but may panic).
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		diContext := r.Context()
+		requestContext := r.Context()
 		for beanID, scope := range scopes {
 			if scope != Request {
 				continue
 			}
-			beanInstance := getRequestBeanInstance(beanID)
-			diContext = context.WithValue(diContext, BeanKey(beanID), beanInstance)
+			beanInstance := getRequestBeanInstance(requestContext, beanID)
+			requestContext = context.WithValue(requestContext, BeanKey(beanID), beanInstance)
 			if isCloseable(beanInstance) {
 				go func(ctx context.Context, beanInstance interface{}) {
 					<-ctx.Done()
@@ -45,7 +45,7 @@ func Middleware(next http.Handler) http.Handler {
 				}(r.Context(), beanInstance)
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(diContext))
+		next.ServeHTTP(w, r.WithContext(requestContext))
 	})
 }
 

@@ -15,6 +15,7 @@
 package di
 
 import (
+	"context"
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,11 @@ type singletonBean struct {
 
 type requestBean struct {
 	Scope Scope `di.scope:"request"`
+	ctx   context.Context
+}
+
+func (rb *requestBean) SetContext(ctx context.Context) {
+	rb.ctx = ctx
 }
 
 func (rb *requestBean) Close() error {
@@ -51,6 +57,7 @@ func (suite *TestSuite) TestMiddleware() {
 		requestBeanInstance, ok := r.Context().Value(BeanKey("requestBean")).(*requestBean)
 		assert.True(suite.T(), ok)
 		assert.NotNil(suite.T(), requestBeanInstance)
+		assert.NotEqual(suite.T(), context.Background(), requestBeanInstance.ctx)
 	}))
 	server := httptest.NewServer(middleware)
 	defer server.Close()
