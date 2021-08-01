@@ -183,7 +183,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanNonReferenceDependency() {
 	type SingletonBean struct {
 		SomeOtherBean string `di.inject:"someOtherBean"`
 	}
-	expectedError := errors.New(UnsupportedDependencyType)
+	expectedError := errors.New(unsupportedDependencyType)
 	overwritten, err := RegisterBean("", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
@@ -969,7 +969,7 @@ func (suite *TestSuite) TestInjectRequestBean() {
 	overwritten, err = RegisterBean("requestBean", reflect.TypeOf((*RequestBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New(RequestScopedBeansCantBeInjected)
+	expectedError := errors.New(requestScopedBeansCantBeInjected)
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)

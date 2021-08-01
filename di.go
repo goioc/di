@@ -50,9 +50,9 @@ const (
 )
 
 const (
-	UnsupportedDependencyType        = "unsupported dependency type: all injections must be done by pointer, interface, slice or map"
-	BeanAlreadyRegistered            = "bean with such ID is already registered, overwriting it"
-	RequestScopedBeansCantBeInjected = "request-scoped beans can't be injected: they can only be retrieved from the web-context"
+	unsupportedDependencyType        = "unsupported dependency type: all injections must be done by pointer, interface, slice or map"
+	beanAlreadyRegistered            = "bean with such ID is already registered, overwriting it"
+	requestScopedBeansCantBeInjected = "request-scoped beans can't be injected: they can only be retrieved from the web-context"
 )
 
 var initializeShutdownLock sync.Mutex
@@ -137,7 +137,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 			"id":              beanID,
 			"registered bean": existingBeanType,
 			"new bean":        beanType,
-		}).Warn(BeanAlreadyRegistered)
+		}).Warn(beanAlreadyRegistered)
 	}
 	beanScope, err := getScope(beanType)
 	if err != nil {
@@ -151,7 +151,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 		}
 		if field.Type.Kind() != reflect.Ptr && field.Type.Kind() != reflect.Interface &&
 			field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Map {
-			return false, errors.New(UnsupportedDependencyType)
+			return false, errors.New(unsupportedDependencyType)
 		}
 	}
 	beans[beanID] = beanType
@@ -179,7 +179,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 			"id":                beanID,
 			"registered bean":   existingBeanType,
 			"new bean instance": beanType,
-		}).Warn(BeanAlreadyRegistered)
+		}).Warn(beanAlreadyRegistered)
 	}
 	beans[beanID] = beanType
 	scopes[beanID] = Singleton
@@ -204,7 +204,7 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx co
 		logrus.WithFields(logrus.Fields{
 			"id":              beanID,
 			"registered bean": existingBeanType,
-		}).Warn(BeanAlreadyRegistered)
+		}).Warn(beanAlreadyRegistered)
 	}
 	scopes[beanID] = beanScope
 	beanFactories[beanID] = beanFactory
@@ -299,7 +299,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				}
 			}
 			if beanScope == Request {
-				return errors.New(RequestScopedBeansCantBeInjected)
+				return errors.New(requestScopedBeansCantBeInjected)
 			}
 			instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
 			if err != nil {
@@ -308,7 +308,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			fieldToInject.Set(reflect.ValueOf(instanceToInject))
 		case reflect.Slice:
 			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
-				return errors.New(UnsupportedDependencyType)
+				return errors.New(unsupportedDependencyType)
 			}
 			candidates := findInjectionCandidates(fieldToInject.Type().Elem())
 			if len(candidates) < 1 {
@@ -322,7 +322,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				beanToInjectType := beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
 				if scopes[beanToInject] == Request {
-					return errors.New(RequestScopedBeansCantBeInjected)
+					return errors.New(requestScopedBeansCantBeInjected)
 				}
 				instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
 				if err != nil {
@@ -332,7 +332,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			}
 		case reflect.Map:
 			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
-				return errors.New(UnsupportedDependencyType)
+				return errors.New(unsupportedDependencyType)
 			}
 			candidates := findInjectionCandidates(fieldToInject.Type().Elem())
 			if len(candidates) < 1 {
@@ -346,7 +346,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				beanToInjectType := beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
 				if scopes[beanToInject] == Request {
-					return errors.New(RequestScopedBeansCantBeInjected)
+					return errors.New(requestScopedBeansCantBeInjected)
 				}
 				instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
 				if err != nil {
@@ -355,7 +355,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				fieldToInject.SetMapIndex(reflect.ValueOf(beanToInject), reflect.ValueOf(instanceToInject))
 			}
 		default:
-			return errors.New(UnsupportedDependencyType)
+			return errors.New(unsupportedDependencyType)
 		}
 	}
 	return nil
