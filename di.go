@@ -247,7 +247,7 @@ func injectSingletonDependencies() error {
 		if _, ok := beanFactories[beanID]; ok {
 			continue
 		}
-		err := injectDependencies(beanID, instance, make(map[string]bool))
+		err := injectDependencies(beanID, instance, make(map[string]int))
 		if err != nil {
 			return err
 		}
@@ -255,7 +255,7 @@ func injectSingletonDependencies() error {
 	return nil
 }
 
-func injectDependencies(beanID string, instance interface{}, chain map[string]bool) error {
+func injectDependencies(beanID string, instance interface{}, chain map[string]int) error {
 	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceType := beans[beanID]
 	instanceElement := instanceType.Elem()
@@ -516,14 +516,14 @@ func GetInstanceSafe(beanID string) (interface{}, error) {
 	if scopes[beanID] == Request {
 		return nil, errors.New("request-scoped beans can't be retrieved directly from the container: they can only be retrieved from the web-context")
 	}
-	return getInstance(context.Background(), beanID, make(map[string]bool))
+	return getInstance(context.Background(), beanID, make(map[string]int))
 }
 
 func getRequestBeanInstance(ctx context.Context, beanID string) interface{} {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		panic("container is not initialized: can't lookup instances of beans yet")
 	}
-	beanInstance, err := getInstance(ctx, beanID, make(map[string]bool))
+	beanInstance, err := getInstance(ctx, beanID, make(map[string]int))
 	if err != nil {
 		panic(err)
 	}
@@ -540,17 +540,17 @@ func isBeanRegistered(beanID string) bool {
 	return false
 }
 
-func getInstance(ctx context.Context, beanID string, chain map[string]bool) (interface{}, error) {
+func getInstance(ctx context.Context, beanID string, chain map[string]int) (interface{}, error) {
 	if !isBeanRegistered(beanID) {
 		return nil, errors.New("bean is not registered: " + beanID)
 	}
 	if scopes[beanID] == Singleton {
 		return singletonInstances[beanID], nil
 	}
-	if _, ok := chain[beanID]; ok {
+	if count := chain[beanID]; count > 1 {
 		return nil, errors.New("circular dependency detected for bean: " + beanID)
 	}
-	chain[beanID] = true
+	chain[beanID] += 1
 	instance, err := createInstance(ctx, beanID)
 	if err != nil {
 		return nil, err
