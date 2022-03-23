@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Go IoC
+ * Copyright (c) 2022 Go IoC
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@ import (
 	"unsafe"
 )
 
-// Scope is a enum for bean scopes supported in this IoC container.
+// Scope is an enum for bean scopes supported in this IoC container.
 type Scope string
 
 const (
