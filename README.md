@@ -9,6 +9,8 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=goioc_di&metric=alert_status)](https://sonarcloud.io/dashboard?id=goioc_di)
 [![DeepSource](https://static.deepsource.io/deepsource-badge-light-mini.svg)](https://deepsource.io/gh/goioc/di/?ref=repository-badge)
 
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/dtitov)
+
 ## Why DI in Go? Why IoC at all?
 I've been using Dependency Injection in Java for nearly 10 years via [Spring Framework](https://spring.io/). I'm not saying that one can't live without it, but it's proven to be very useful for large enterprise-level applications. You may argue that Go follows a completely different ideology, values different principles and paradigms than Java, and DI is not needed in this better world. And I can even partly agree with that. And yet I decided to create this light-weight Spring-like library for Go. You are free to not use it, after all 🙂
 
