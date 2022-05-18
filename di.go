@@ -459,19 +459,13 @@ func initializeSingletonInstances() error {
 }
 
 func initializeInstance(beanID string, instance interface{}) error {
-	initializingBean := reflect.TypeOf((*InitializingBean)(nil)).Elem()
-	bean := reflect.TypeOf(instance)
-	if bean.Implements(initializingBean) {
-		initializingMethod, ok := bean.MethodByName(initializingBean.Method(0).Name)
-		if !ok {
-			return errors.New("unexpected behavior: can't find method PostConstruct() in bean " + bean.String())
-		}
+	if impl, ok := instance.(InitializingBean); ok {
 		logrus.WithField("beanID", beanID).Trace("initializing bean")
-		errorValue := initializingMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance)})[0]
-		if !errorValue.IsNil() {
-			return errorValue.Elem().Interface().(error)
+		if err := impl.PostConstruct(); err != nil {
+			return err
 		}
 	}
+	bean := reflect.TypeOf(instance)
 	if postprocessors, ok := beanPostprocessors[bean]; ok {
 		logrus.WithField("beanID", beanID).Trace("postprocessing bean")
 		for _, postprocessor := range postprocessors {
