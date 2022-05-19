@@ -16,10 +16,11 @@ package di
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+
+	"github.com/stretchr/testify/assert"
 )
 
 var closed bool
@@ -36,7 +37,7 @@ func (rb *requestBean) SetContext(ctx context.Context) {
 	rb.ctx = ctx
 }
 
-func (rb *requestBean) Close() error {
+func (*requestBean) Close() error {
 	closed = true
 	return nil
 }
