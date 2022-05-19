@@ -125,7 +125,7 @@ The main component of the library is the [Inversion of Control Container](https:
 
 For the container to become aware of the beans, one must register them manually (unlike Java, unfortunately, we can't scan classpath to do it automatically, because Go runtime doesn't contain high-level information about types). How can one register beans in the container?
 
-- **By type**. This is described in the example above. A structure is declared with a field tagged with `di.scope:"<scope>"`. This field can be even omitted - in this case, the default scope will be `Singleton`. Than the registration is done like this:
+- **By type**. This is described in the example above. A structure is declared with a field tagged with `di.scope:"<scope>"`. This field can be even omitted - in this case, the default scope will be `Singleton`. Then the registration is done like this:
 ```go
 di.RegisterBean("beanID", reflect.TypeOf((*YourAwesomeStructure)(nil)))
 ```
