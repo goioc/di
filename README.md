@@ -237,7 +237,7 @@ type SingletonBean struct {
 }
 ```
 
-In this case, if `someOtherBean` is not found in the Container, you will get `nill` injected into this field.
+In this case, if `someOtherBean` is not found in the Container, you will get `nil` injected into this field.
 
 In fact, you don't need a bean ID to preform an injection! Check this out:
 
