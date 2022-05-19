@@ -152,7 +152,7 @@ Note that factory-method accepts `context.Context`. It can be useful for request
 
 ### Beans initialization
 
-There's a special interface `InitializingBean` that can be implemented to provide your bean with some initialization logic that will we executed after the container is initialized (for `Singleton` beans) or after the `Prototype`/`Request` instance is created. Again, you can also lookup other beans during initialization (since the container is ready by that time):
+There's a special interface `InitializingBean` that can be implemented to provide your bean with some initialization logic that will be executed after the container is initialized (for `Singleton` beans) or after the `Prototype`/`Request` instance is created. Again, you can also lookup other beans during initialization (since the container is ready by that time):
 
 ```go
 type PostConstructBean1 struct {
