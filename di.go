@@ -17,13 +17,14 @@ package di
 import (
 	"context"
 	"errors"
-	"github.com/sirupsen/logrus"
 	"io"
 	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Scope is an enum for bean scopes supported in this IoC container.
@@ -278,9 +279,8 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if len(candidates) < 1 {
 					if optionalDependency {
 						continue
-					} else {
-						return errors.New("no candidates found for the injection")
 					}
+					return errors.New("no candidates found for the injection")
 				}
 				if len(candidates) > 1 {
 					return errors.New("more then one candidate found for the injection")
@@ -294,9 +294,8 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if optionalDependency {
 					logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
 					continue
-				} else {
-					return errors.New("no dependency found")
 				}
+				return errors.New("no dependency found")
 			}
 			if beanScope == Request {
 				return errors.New(requestScopedBeansCantBeInjected)
