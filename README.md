@@ -248,7 +248,7 @@ type SingletonBean struct {
 ```
 
 In this case, DI will try to find a candidate for the injection automatically (among registered beans of type `*string`). Cool, ain't it? 🤠
-It will panic though if no candidates are found (and if the dependency is not marked as optional), or if there is more than one candidates found. 
+It will panic though if no candidates are found (and if the dependency is not marked as optional), or if there is more than one candidate found. 
 
 Finally, you can inject beans to slices and maps. It works similarly to the ID-less inections above, but injects all candidates that were found:
 
