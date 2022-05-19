@@ -17,18 +17,19 @@ package di
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 	"reflect"
 	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 type TestSuite struct {
 	suite.Suite
 }
 
-func (suite *TestSuite) TearDownTest() {
+func (*TestSuite) TearDownTest() {
 	resetContainer()
 	closedSingletons = nil
 	singletonBeansWithErrorOnClose = nil
@@ -545,7 +546,7 @@ func (suite *TestSuite) TestBeanFunction() {
 type failingSingletonBean struct {
 }
 
-func (fsb *failingSingletonBean) PostConstruct() error {
+func (*failingSingletonBean) PostConstruct() error {
 	return errors.New("error message")
 }
 
@@ -564,7 +565,7 @@ type failingPrototypeBean struct {
 	Scope Scope `di.scope:"prototype"`
 }
 
-func (fpb *failingPrototypeBean) PostConstruct() error {
+func (*failingPrototypeBean) PostConstruct() error {
 	return errors.New("error message")
 }
 
@@ -775,7 +776,7 @@ type someInterface interface {
 type otherBean struct {
 }
 
-func (o otherBean) someMethod() {
+func (otherBean) someMethod() {
 }
 
 func (suite *TestSuite) TestInjectByTypeWithInterface() {
@@ -1103,7 +1104,7 @@ var closedSingletons []bool
 type SingletonBeanWithClose struct {
 }
 
-func (sb *SingletonBeanWithClose) Close() error {
+func (*SingletonBeanWithClose) Close() error {
 	closedSingletons = append(closedSingletons, true)
 	return nil
 }
@@ -1113,7 +1114,7 @@ type SingletonBeanWithErrorOnClose struct {
 
 var singletonBeansWithErrorOnClose []error = nil
 
-func (sb *SingletonBeanWithErrorOnClose) Close() error {
+func (*SingletonBeanWithErrorOnClose) Close() error {
 	err := errors.New("cannot close the bean")
 	singletonBeansWithErrorOnClose = append(singletonBeansWithErrorOnClose, err)
 	return err
