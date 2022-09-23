@@ -512,7 +512,7 @@ func GetInstanceSafe(beanID string) (interface{}, error) {
 	return getInstance(context.Background(), beanID, make(map[string]bool))
 }
 
-//GetInstanceSafe function returns bean instance by its ID with scope of the context. It may panic.
+// GetRequestBeanInstance function returns bean instance by its ID with scope of the context. It may panic.
 func GetRequestBeanInstance(ctx context.Context, beanID string) interface{} {
 	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
 		panic("container is not initialized: can't lookup instances of beans yet")
