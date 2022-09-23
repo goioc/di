@@ -1006,7 +1006,7 @@ func (suite *TestSuite) TestFailRequestBeanRetrieval() {
 	err = InitializeContainer()
 	assert.NoError(suite.T(), err)
 	assert.Panics(suite.T(), func() {
-		getRequestBeanInstance(context.Background(), "requestBean")
+		GetRequestBeanInstance(context.Background(), "requestBean")
 	})
 }
 

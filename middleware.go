@@ -33,7 +33,7 @@ func Middleware(next http.Handler) http.Handler {
 			if scope != Request {
 				continue
 			}
-			beanInstance := getRequestBeanInstance(requestContext, beanID)
+			beanInstance := GetRequestBeanInstance(requestContext, beanID)
 			requestContext = context.WithValue(requestContext, BeanKey(beanID), beanInstance)
 			if isCloseable(beanInstance) {
 				go func(ctx context.Context, beanInstance interface{}) {
