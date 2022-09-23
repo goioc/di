@@ -1152,7 +1152,7 @@ func (suite *TestSuite) TestShutdownErrorOnClose() {
 }
 
 func (suite *TestSuite) TestShutdownContinueOnError() {
-	//cause of map usage internally in RegisterBean and order is unknown
+	// cause of map usage internally in RegisterBean and order is unknown
 	for i := 1; i < 10; i++ {
 		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeOf((*SingletonBeanWithClose)(nil)))
 		i++
