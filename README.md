@@ -145,7 +145,7 @@ di.RegisterBeanFactory("beanID", Singleton, func(context.Context) (interface{}, 
 ```
 Feel free to use any scope with this method. By the way, you can even lookup other beans within the factory:
 ```go
-di.RegisterBeanFactory("beanID", Singleton, func(context.Context) (interface{}, error) {
+di.RegisterBeanFactory("beanID", Prototype, func(context.Context) (interface{}, error) {
 		return di.GetInstance("someOtherBeanID"), nil
 	})
 ```
