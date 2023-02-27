@@ -5,7 +5,6 @@
 [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/goioc/di/?tab=doc)
 [![CodeFactor](https://www.codefactor.io/repository/github/goioc/di/badge)](https://www.codefactor.io/repository/github/goioc/di)
 [![Go Report Card](https://goreportcard.com/badge/github.com/goioc/di)](https://goreportcard.com/report/github.com/goioc/di)
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/goioc/di.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/goioc/di/alerts/)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=goioc_di&metric=alert_status)](https://sonarcloud.io/dashboard?id=goioc_di)
 [![codecov](https://codecov.io/gh/goioc/di/branch/master/graph/badge.svg)](https://codecov.io/gh/goioc/di)
 [![DeepSource](https://static.deepsource.io/deepsource-badge-light-mini.svg)](https://deepsource.io/gh/goioc/di/?ref=repository-badge)
