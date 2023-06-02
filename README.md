@@ -25,7 +25,7 @@ It's better to show than to describe. Take a look at this toy-example (error-han
 package services
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -37,7 +37,7 @@ func (ws *WeatherService) Weather(city string) (*string, error) {
 	if err != nil {
 		return nil, err
 	}
-	all, err := ioutil.ReadAll(response.Body)
+	all, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
