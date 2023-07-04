@@ -316,7 +316,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 					logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
 					continue
 				}
-				return fmt.Errorf("%w: on bean %s miss dependency %s", ErrNoDependencyFound, beanID, beanToInject)
+				return fmt.Errorf("%w: on bean [%s] miss dependency [%s]", ErrNoDependencyFound, beanID, beanToInject)
 			}
 			if beanScope == Request {
 				return errors.New(requestScopedBeansCantBeInjected)
