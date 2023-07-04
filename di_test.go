@@ -42,10 +42,10 @@ func TestDITestSuite(t *testing.T) {
 func (suite *TestSuite) TestInitializeContainerTwice() {
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("container is already initialized: reinitialization is not supported")
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrReinitializationNotSupported)
+		assert.ErrorIs(suite.T(), err, ErrContainerIsAlreadyInitialized)
 	}
 }
 
@@ -69,16 +69,17 @@ func (suite *TestSuite) TestGetInstanceBeforeContainerInitialization() {
 func (suite *TestSuite) TestRegisterBeanAfterContainerInitialization() {
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("container is already initialized: can't register new bean")
 	overwritten, err := RegisterBean("", nil)
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrCannotRegisterNewBean)
+		assert.ErrorIs(suite.T(), err, ErrContainerIsAlreadyInitialized)
 	}
 	overwritten, err = RegisterBeanInstance("", nil)
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrCannotRegisterNewBean)
+		assert.ErrorIs(suite.T(), err, ErrContainerIsAlreadyInitialized)
 	}
 }
 
@@ -114,10 +115,10 @@ func (suite *TestSuite) TestBeanFactoryCalledOnce() {
 func (suite *TestSuite) TestRegisterBeanPostprocessorAfterContainerInitialization() {
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("container is already initialized: can't register bean postprocessor")
 	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), nil)
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrCannotRegisterBeanPostProcessor)
+		assert.ErrorIs(suite.T(), err, ErrContainerIsAlreadyInitialized)
 	}
 }
 
@@ -172,11 +173,11 @@ func (suite *TestSuite) TestRegisterSingletonBeanUnsupportedScope() {
 	type SingletonBean struct {
 		Scope Scope `di.scope:"invalid"`
 	}
-	expectedError := errors.New("unsupported scope: invalid")
 	overwritten, err := RegisterBean("", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrUnsupportedScope)
+		assert.ErrorContains(suite.T(), err, "invalid")
 	}
 }
 
@@ -199,10 +200,10 @@ func (suite *TestSuite) TestRegisterSingletonBeanWrongOptionalValue() {
 	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("invalid di.optional value: fls")
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrInvalidOptionalValue)
+		assert.ErrorContains(suite.T(), err, "fls")
 	}
 }
 
@@ -213,10 +214,10 @@ func (suite *TestSuite) TestRegisterSingletonBeanMissingImplicitlyRequiredDepend
 	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("no dependency found")
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrNoDependencyFound)
+		assert.ErrorContains(suite.T(), err, "someOtherBean")
 	}
 }
 
@@ -227,10 +228,10 @@ func (suite *TestSuite) TestRegisterSingletonBeanMissingExplicitlyRequiredDepend
 	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("no dependency found")
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
-		assert.Equal(suite.T(), expectedError, err)
+		assert.ErrorIs(suite.T(), err, ErrNoDependencyFound)
+		assert.ErrorContains(suite.T(), err, "someOtherBean")
 	}
 }
 
@@ -361,11 +362,11 @@ func (suite *TestSuite) TestRegisterSingletonBeanFactory() {
 func (suite *TestSuite) TestRegisterBeanFactoryAfterContainerInitialization() {
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
-	expectedFactoryError := errors.New("container is already initialized: can't register new bean factory")
 	overwritten, err := RegisterBeanFactory("", Singleton, nil)
 	assert.False(suite.T(), overwritten)
 	assert.Error(suite.T(), err)
-	assert.Equal(suite.T(), expectedFactoryError, err)
+	assert.ErrorIs(suite.T(), err, ErrCannotRegisterNewBeanFactory)
+	assert.ErrorIs(suite.T(), err, ErrContainerIsAlreadyInitialized)
 }
 
 func (suite *TestSuite) TestRegisterPrototypeBean() {
