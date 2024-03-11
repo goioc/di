@@ -259,9 +259,17 @@ func injectSingletonDependencies() error {
 func injectDependencies(beanID string, instance interface{}, chain map[string]bool) error {
 	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceType := beans[beanID]
-	instanceElement := instanceType.Elem()
+	return injectDependenciesWithType(instanceType.Elem(), beanID, instance, chain)
+}
+
+func injectDependenciesWithType(instanceElement reflect.Type, beanID string, instance interface{}, chain map[string]bool) error {
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
+		if field.Type.Kind() == reflect.Struct && field.Anonymous {
+			fieldToInject := reflect.ValueOf(instance).Elem().Field(i)
+			injectDependenciesWithType(field.Type, beanID, fieldToInject.Addr().Interface(), chain)
+			continue
+		}
 		beanToInject, ok := field.Tag.Lookup(string(inject))
 		if !ok {
 			continue

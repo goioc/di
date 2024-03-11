@@ -1166,3 +1166,26 @@ func (suite *TestSuite) TestShutdownContinueOnError() {
 	assert.Equal(suite.T(), 5, len(closedSingletons))
 	assert.Equal(suite.T(), 5, len(singletonBeansWithErrorOnClose))
 }
+
+func (suite *TestSuite) TestInjectInParent() {
+	type SingletonBeanParent struct {
+		otherBean1 someInterface `di.inject:""`
+	}
+	type SingletonBeanChild struct {
+		SingletonBeanParent
+		otherBean2 someInterface `di.inject:""`
+	}
+	
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBeanChild)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*otherBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("singletonBean")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance.(*SingletonBeanChild).otherBean1)
+	assert.NotNil(suite.T(), instance.(*SingletonBeanChild).otherBean2)
+}
