@@ -1188,4 +1188,80 @@ func (suite *TestSuite) TestInjectInParent() {
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), instance.(*SingletonBeanChild).otherBean1)
 	assert.NotNil(suite.T(), instance.(*SingletonBeanChild).otherBean2)
+	_, ok := instance.(*SingletonBeanChild).otherBean1.(*otherBean)
+	assert.True(suite.T(), ok)
+	assert.EqualValues(suite.T(), instance.(*SingletonBeanChild).otherBean1, instance.(*SingletonBeanChild).otherBean2)
+}
+
+type SingletonConfiguringInnerBean struct {
+	value int
+}
+type SingletonInnerBean struct {
+}
+
+type SingletonConfiguredBean struct {
+	innerConfigBean *SingletonConfiguringInnerBean `di.inject:""`
+	innerBean *SingletonInnerBean `di.inject:""`
+	value int
+	postConstructCalled bool
+}
+
+type Config1 struct {
+	Conf int
+}
+
+type Config2 struct {
+	Conf int
+}
+
+func (bean *SingletonConfiguredBean) Configure(conf *Config1) error {
+	bean.value = conf.Conf
+	return nil
+}
+
+func (bean *SingletonConfiguredBean) PostConstruct() error {
+	bean.postConstructCalled = true
+	if bean.value == 0 {
+		return errors.New("not initialized")
+	}
+	return nil
+}
+
+func (bean *SingletonConfiguringInnerBean) Configure(conf *Config2) error {
+	bean.value = conf.Conf
+	return nil
+}
+
+func (suite *TestSuite) TestInjectConfiguration() {
+	overwritten, err := RegisterBean("singletonBean1", reflect.TypeOf((*SingletonConfiguredBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("singletonBean2", reflect.TypeOf((*SingletonConfiguredBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("innerConfigBean", reflect.TypeOf((*SingletonConfiguringInnerBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	overwritten, err = RegisterBean("innerBean", reflect.TypeOf((*SingletonInnerBean)(nil)))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	RegisterBeanConfiguration(&Config1{Conf: 11})
+	RegisterBeanConfiguration(&Config2{Conf: 22})
+	err = InitializeContainer()
+	assert.NoError(suite.T(), err)
+	instance, err := GetInstanceSafe("singletonBean1")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance.(*SingletonConfiguredBean).innerConfigBean)
+	assert.NotNil(suite.T(), instance.(*SingletonConfiguredBean).innerBean)
+	assert.Equal(suite.T(), 11, instance.(*SingletonConfiguredBean).value)
+	assert.Equal(suite.T(), 22, instance.(*SingletonConfiguredBean).innerConfigBean.value)
+	assert.Equal(suite.T(), true, instance.(*SingletonConfiguredBean).postConstructCalled)
+
+	instance, err = GetInstanceSafe("singletonBean2")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance.(*SingletonConfiguredBean).innerConfigBean)
+	assert.NotNil(suite.T(), instance.(*SingletonConfiguredBean).innerBean)
+	assert.Equal(suite.T(), 11, instance.(*SingletonConfiguredBean).value)
+	assert.Equal(suite.T(), 22, instance.(*SingletonConfiguredBean).innerConfigBean.value)
+	assert.Equal(suite.T(), true, instance.(*SingletonConfiguredBean).postConstructCalled)
 }
