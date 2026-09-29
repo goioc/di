@@ -7,8 +7,6 @@ import (
 	"reflect"
 	"sort"
 	"sync"
-
-	"github.com/sirupsen/logrus"
 )
 
 type lifecycleState uint8
@@ -190,6 +188,8 @@ func (c *container) constructionNode(ctx context.Context, id string, r *resoluti
 
 // build allocates and injects fields; initialize runs lifecycle hooks afterward.
 // Singleton pointers are published early so tagged singleton cycles can be wired.
+// Dependencies are constructed with the enclosing resolution's context so a
+// request-scoped graph inherits the request's context and cancellation.
 func (c *container) build(ctx context.Context, id string, r *resolution, path map[string]bool) (n *beanNode, err error) {
 	n, existing, err := c.constructionNode(ctx, id, r, path)
 	if err != nil || existing {
@@ -223,7 +223,7 @@ func (c *container) build(ctx context.Context, id string, r *resolution, path ma
 	}
 	if !n.provided && c.factories[id] == nil {
 		err = c.injectDependencies(id, n.instance, func(dependency string) (interface{}, error) {
-			dep, buildErr := c.build(context.Background(), dependency, r, path)
+			dep, buildErr := c.build(ctx, dependency, r, path)
 			if buildErr != nil {
 				return nil, buildErr
 			}
@@ -466,10 +466,20 @@ func (c *container) claimCleanup(n *beanNode, includeSingletons, includeProvided
 	return value
 }
 
+// closeBean releases the bean's resources. Errors and panics from the bean's
+// Close are logged, so one misbehaving bean cannot abort cleanup of the rest.
 func closeBean(id string, instance interface{}) {
 	if closer, ok := instance.(io.Closer); ok {
+		closed := false
+		defer func() {
+			if !closed {
+				p := recover()
+				logger.WithField("beanID", id).Errorf("panic while closing bean: %v", p)
+			}
+		}()
 		if err := closer.Close(); err != nil {
-			logrus.WithField("beanID", id).Error(err)
+			logger.WithField("beanID", id).Error(err)
 		}
+		closed = true
 	}
 }

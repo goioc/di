@@ -64,7 +64,8 @@ type InitializingBean interface {
 }
 
 // ContextAwareBean receives a context before PostConstruct and postprocessors.
-// Request beans receive a context derived from the HTTP request; other scopes
+// Request beans and their prototype dependencies receive a context derived from
+// the HTTP request; singleton dependencies and standalone prototype resolutions
 // receive context.Background. Failed request initialization cancels its context
 // before cleanup, and successful request contexts end when their parent is canceled.
 type ContextAwareBean interface {
@@ -72,9 +73,9 @@ type ContextAwareBean interface {
 	SetContext(ctx context.Context)
 }
 
-func init() {
-	logrus.SetFormatter(&logrus.TextFormatter{})
-}
+// logger is the package's own logger instance so that importing di never
+// mutates the host application's global logrus configuration.
+var logger = logrus.New()
 
 // RegisterBeanPostprocessor appends a callback for an exact runtime bean type.
 // Callbacks run in registration order after PostConstruct, including for supplied
@@ -183,7 +184,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 	}
 	var existingBeanType reflect.Type
 	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
-		logrus.WithFields(logrus.Fields{
+		logger.WithFields(logrus.Fields{
 			"id":              beanID,
 			"registered bean": existingBeanType,
 			"new bean":        beanType,
@@ -233,7 +234,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 	}
 	var existingBeanType reflect.Type
 	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
-		logrus.WithFields(logrus.Fields{
+		logger.WithFields(logrus.Fields{
 			"id":                beanID,
 			"registered bean":   existingBeanType,
 			"new bean instance": beanType,
@@ -272,7 +273,7 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx co
 	overwritten = isBeanRegistered(beanID)
 	var existingBeanType reflect.Type
 	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
-		logrus.WithFields(logrus.Fields{
+		logger.WithFields(logrus.Fields{
 			"id":              beanID,
 			"registered bean": existingBeanType,
 		}).Warn(beanAlreadyRegistered)
@@ -324,7 +325,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 // injectDependencies fills tagged fields, including unexported ones, using the
 // current resolution's resolver so construction tracks dependency ownership.
 func (c *container) injectDependencies(beanID string, instance interface{}, resolve func(string) (interface{}, error)) error {
-	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
+	logger.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceElement := c.beans[beanID].Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
@@ -363,7 +364,7 @@ func (c *container) injectField(beanID, dependency string, target reflect.Value,
 			return errors.New("no candidates found for the injection")
 		}
 		if len(candidates) > 1 {
-			return errors.New("more then one candidate found for the injection")
+			return errors.New("more than one candidate found for the injection")
 		}
 		dependency = candidates[0]
 	}
@@ -428,7 +429,7 @@ func (c *container) dependencyValue(beanID, dependency string, optionalDependenc
 }
 
 func logInjection(beanID string, instanceElement reflect.Type, beanToInject string, beanToInjectType reflect.Type) {
-	logrus.WithFields(logrus.Fields{
+	logger.WithFields(logrus.Fields{
 		"bean":               beanID,
 		"beanType":           instanceElement,
 		"dependencyBean":     beanToInject,
@@ -474,7 +475,7 @@ func (c *container) initializeInstance(ctx context.Context, beanID string, insta
 		impl.SetContext(ctx)
 	}
 	if impl, ok := instance.(InitializingBean); ok {
-		logrus.WithField("beanID", beanID).Trace("initializing bean")
+		logger.WithField("beanID", beanID).Trace("initializing bean")
 		if err := impl.PostConstruct(); err != nil {
 			return err
 		}
