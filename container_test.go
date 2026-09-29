@@ -102,7 +102,7 @@ func TestResolutionCleanupLeavesSingletonDependenciesOpen(t *testing.T) {
 	node, err := c.build(context.Background(), "consumer", &resolution{}, make(map[string]bool))
 	require.NoError(t, err)
 	require.NoError(t, c.initialize(node, make(map[*beanNode]bool)))
-	c.finishInitialization()
+	require.NoError(t, c.finishInitialization())
 	// Cleanup must respect ownership even when handed the entire mixed-scope graph.
 	c.closeNodes([]*beanNode{node, c.singletons["dependency"]}, false, false)
 	require.Equal(t, 1, node.instance.(*mixedCleanupConsumer).closed)

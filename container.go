@@ -289,9 +289,18 @@ func (c *container) initialize(n *beanNode, path map[*beanNode]bool) (err error)
 	return nil
 }
 
-func (c *container) finishInitialization() {
+func (c *container) finishInitialization() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for _, id := range c.ids(Singleton) {
+		n := c.singletons[id]
+		if n.err != nil {
+			return n.err
+		}
+		if n.state != ready {
+			return errors.New("singleton initialization did not complete: " + id)
+		}
+	}
 	c.starting = false
 	c.created = nil
 	c.startupClosed = nil
@@ -302,6 +311,7 @@ func (c *container) finishInitialization() {
 		}
 	}
 	c.completed = singletons
+	return nil
 }
 
 func (c *container) rollback() {
@@ -395,13 +405,15 @@ func (c *container) claimCleanup(n *beanNode, includeSingletons, includeProvided
 	if value == nil || n.closed || c.preserveInstance(n, includeSingletons, includeProvided) {
 		return nil
 	}
-	hasIdentity := hasInstanceIdentity(value)
-	if hasIdentity && (closed[value] || c.startupClosed[value]) {
+	// Results equal to a supplied instance share that instance's ownership,
+	// including zero-size pointers. Other zero-size allocations remain separate.
+	deduplicate := hasInstanceIdentity(value) || c.provided[value]
+	if deduplicate && (closed[value] || c.startupClosed[value]) {
 		return nil
 	}
 	n.closed = true
-	closed[value] = hasIdentity
-	if c.starting && hasIdentity {
+	closed[value] = deduplicate
+	if c.starting && deduplicate {
 		c.startupClosed[value] = true
 	}
 	return value

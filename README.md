@@ -178,11 +178,13 @@ func (pcb *PostConstructBean2) PostConstruct() error {
 }
 ```
 
-Wait for `InitializeContainer()` to succeed before starting application work or serving requests. Registration is frozen while initialization, rollback, or shutdown is in progress. Singleton hooks can retrieve their own instance, but must not assume another member of an initialization cycle has finished its hook. A lookup that re-enters a singleton's unfinished construction returns an error.
+Wait for `InitializeContainer()` to succeed before starting application work or serving requests. Startup waits for admitted lookups and checks every singleton's final initialization result before succeeding. Registration is frozen while initialization, rollback, or shutdown is in progress. Singleton hooks can retrieve their own instance, but must not assume another member of an initialization cycle has finished its hook. A lookup that re-enters a singleton's unfinished construction returns an error.
 
 If startup fails, the container closes beans it created during that attempt and keeps the registrations so initialization can be retried. Pre-created instances registered with `RegisterBeanInstance` are retained; their initialization callbacks can run again on retry. A failed prototype or request resolution also closes the new beans created for that dependency graph. Failed request beans have their contexts canceled before cleanup, so their closers can wait for context-bound work to stop. Cleanup errors are logged without replacing the initialization error.
 
 Successful prototypes remain the caller's responsibility to close. Successful request beans are closed on request cancellation or when the wrapped handler returns. Call `di.Close()` to release singletons after stopping application work. It rejects new lookups, waits for active lookups to finish, and closes singletons in reverse initialization order. Concurrent `Close()` callers all wait for that shutdown and container reset to finish. Already-returned beans can outlive a lookup, so draining handlers and background workers remains the application's responsibility.
+
+Factory results that compare equal to a pre-created singleton share its cleanup ownership, including zero-sized values. Shutdown closes that shared instance once.
 
 Do not call `di.Close()` from a factory, initialization hook, context setter, postprocessor, or bean closer, or wait for shutdown inside one: synchronous shutdown would be waiting for that callback to finish. These callbacks can safely inspect registrations using `GetBeanTypes()` and `GetBeanScopes()`.
 

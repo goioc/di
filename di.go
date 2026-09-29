@@ -147,7 +147,17 @@ func InitializeContainer() (err error) {
 			return err
 		}
 	}
-	c.finishInitialization()
+	// Startup callbacks can launch parallel lookups. Wait for those lookups
+	// before committing, so their singleton hooks and errors are accounted for.
+	initializeShutdownLock.Lock()
+	for activeLookups != 0 {
+		lifecycleChanged.Wait()
+	}
+	err = c.finishInitialization()
+	initializeShutdownLock.Unlock()
+	if err != nil {
+		return err
+	}
 	succeeded = true
 	return nil
 }

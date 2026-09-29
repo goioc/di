@@ -322,3 +322,75 @@ func TestRollbackWaitsForActiveLookup(t *testing.T) {
 	require.ErrorIs(t, initializationErr, failure)
 	require.Equal(t, 2, closed, "rollback must clean up both the singleton and the completed startup lookup")
 }
+
+func TestStartupWaitsForParallelSingletonInitialization(t *testing.T) {
+	for _, outcome := range []string{"success", "error", "panic"} {
+		t.Run(outcome, func(t *testing.T) {
+			defer resetContainer()
+			started, releaseHook := make(chan struct{}), make(chan struct{})
+			lookupDone := make(chan struct{})
+			var lookupErr error
+			var lookupPanic interface{}
+			closed := 0
+			failure := errors.New("parallel initialization failed")
+			_, err := RegisterBeanFactory("z-worker", Singleton, func(context.Context) (interface{}, error) {
+				return &callbackBean{
+					initHook: func() error {
+						close(started)
+						<-releaseHook
+						switch outcome {
+						case "error":
+							return failure
+						case "panic":
+							panic(failure)
+						}
+						return nil
+					},
+					closeHook: func() error { closed++; return nil },
+				}, nil
+			})
+			require.NoError(t, err)
+			_, err = RegisterBeanFactory("a-launcher", Singleton, func(context.Context) (interface{}, error) {
+				go func() {
+					defer func() { lookupPanic = recover(); close(lookupDone) }()
+					_, lookupErr = GetInstanceSafe("z-worker")
+				}()
+				<-started
+				return new(string), nil
+			})
+			require.NoError(t, err)
+			done := make(chan struct{})
+			var initializationErr error
+			go func() { initializationErr = InitializeContainer(); close(done) }()
+			<-started
+			select {
+			case <-done:
+				t.Error("startup returned before the parallel singleton hook finished")
+			case <-time.After(50 * time.Millisecond):
+			}
+			close(releaseHook)
+			<-lookupDone
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("startup did not finish")
+			}
+			switch outcome {
+			case "success":
+				require.NoError(t, initializationErr)
+				require.NoError(t, lookupErr)
+				require.Nil(t, lookupPanic)
+				Close()
+			case "error":
+				require.ErrorIs(t, initializationErr, failure)
+				require.ErrorIs(t, lookupErr, failure)
+			case "panic":
+				require.Error(t, initializationErr)
+				require.Same(t, failure, lookupPanic)
+			}
+			require.Equal(t, 1, closed)
+			_, err = GetInstanceSafe("z-worker")
+			require.Error(t, err)
+		})
+	}
+}

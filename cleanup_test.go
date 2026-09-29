@@ -319,6 +319,19 @@ func TestShutdownClosesSharedFactoryInstanceOnce(t *testing.T) {
 	require.Equal(t, 1, closed)
 }
 
+func TestShutdownClosesZeroSizeProvidedAliasOnce(t *testing.T) {
+	defer resetContainer()
+	zeroSizeResourceCloses = 0
+	provided := &zeroSizeResource{}
+	_, err := RegisterBeanInstance("provided", provided)
+	require.NoError(t, err)
+	_, err = RegisterBeanFactory("alias", Singleton, func(context.Context) (interface{}, error) { return provided, nil })
+	require.NoError(t, err)
+	require.NoError(t, InitializeContainer())
+	Close()
+	require.Equal(t, 1, zeroSizeResourceCloses)
+}
+
 func TestFailedSingletonLookupKeepsOriginalError(t *testing.T) {
 	defer resetContainer()
 	failure := errors.New("dependency initialization failed")
