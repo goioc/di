@@ -59,6 +59,7 @@ var initializeShutdownLock sync.Mutex
 var containerState lifecycleState
 var runningContainer *container
 var activeLookups int
+var shutdownDone chan struct{}
 var lifecycleChanged = sync.NewCond(&initializeShutdownLock)
 var beans = make(map[string]reflect.Type)
 var beanFactories = make(map[string]func(context.Context) (interface{}, error))
@@ -530,16 +531,19 @@ func GetBeanScopes() map[string]Scope {
 
 // Close stops new lookups, waits for active lookups, and closes singletons in
 // reverse initialization order. Close errors are logged and cleanup continues.
+// Concurrent callers wait for the same shutdown and container reset to finish.
 // Stop application work before calling Close: returned beans can outlive a lookup.
-// Do not call Close from a factory or initialization callback, or wait for Close
-// inside one: shutdown must wait for that callback to finish.
+// Do not call Close from a factory, initialization callback, or bean closer, or
+// wait for Close inside one: shutdown must wait for that callback to finish.
 func Close() {
 	initializeShutdownLock.Lock()
 	for containerState == initializing || containerState == rollingBack {
 		lifecycleChanged.Wait()
 	}
 	if containerState == closing {
+		done := shutdownDone
 		initializeShutdownLock.Unlock()
+		<-done
 		return
 	}
 	c := runningContainer
@@ -547,6 +551,8 @@ func Close() {
 		c = newContainer()
 	}
 	containerState = closing
+	done := make(chan struct{})
+	shutdownDone = done
 	for activeLookups != 0 {
 		lifecycleChanged.Wait()
 	}
@@ -554,6 +560,7 @@ func Close() {
 	defer func() {
 		initializeShutdownLock.Lock()
 		resetContainerWithoutLock()
+		close(done)
 		lifecycleChanged.Broadcast()
 		initializeShutdownLock.Unlock()
 	}()

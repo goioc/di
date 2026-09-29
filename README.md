@@ -182,9 +182,9 @@ Wait for `InitializeContainer()` to succeed before starting application work or 
 
 If startup fails, the container closes beans it created during that attempt and keeps the registrations so initialization can be retried. Pre-created instances registered with `RegisterBeanInstance` are retained; their initialization callbacks can run again on retry. A failed prototype or request resolution also closes the new beans created for that dependency graph. Failed request beans have their contexts canceled before cleanup, so their closers can wait for context-bound work to stop. Cleanup errors are logged without replacing the initialization error.
 
-Successful prototypes remain the caller's responsibility to close. Successful request beans are closed on request cancellation or when the wrapped handler returns. Call `di.Close()` to release singletons after stopping application work. It rejects new lookups, waits for active lookups to finish, and closes singletons in reverse initialization order. Already-returned beans can outlive a lookup, so draining handlers and background workers remains the application's responsibility.
+Successful prototypes remain the caller's responsibility to close. Successful request beans are closed on request cancellation or when the wrapped handler returns. Call `di.Close()` to release singletons after stopping application work. It rejects new lookups, waits for active lookups to finish, and closes singletons in reverse initialization order. Concurrent `Close()` callers all wait for that shutdown and container reset to finish. Already-returned beans can outlive a lookup, so draining handlers and background workers remains the application's responsibility.
 
-Do not call `Close()` from a factory, initialization hook, context setter, or postprocessor, or wait for shutdown inside one: synchronous shutdown would be waiting for that callback to finish. These callbacks, and bean closers, can safely inspect registrations using `GetBeanTypes()` and `GetBeanScopes()`.
+Do not call `di.Close()` from a factory, initialization hook, context setter, postprocessor, or bean closer, or wait for shutdown inside one: synchronous shutdown would be waiting for that callback to finish. These callbacks can safely inspect registrations using `GetBeanTypes()` and `GetBeanScopes()`.
 
 ### Beans post-processors
 

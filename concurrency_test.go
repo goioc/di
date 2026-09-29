@@ -152,6 +152,45 @@ func TestConcurrentLookupAndClose(t *testing.T) {
 	workers.Wait()
 }
 
+func TestConcurrentCloseWaitsForCleanup(t *testing.T) {
+	defer resetContainer()
+	started, releaseCloser := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCloser) }) }
+	defer release()
+	closed := 0
+	_, err := RegisterBeanInstance("bean", &callbackBean{closeHook: func() error {
+		close(started)
+		<-releaseCloser
+		closed++
+		return nil
+	}})
+	require.NoError(t, err)
+	require.NoError(t, InitializeContainer())
+	firstDone, secondDone := make(chan struct{}), make(chan struct{})
+	go func() { Close(); close(firstDone) }()
+	<-started
+	go func() { Close(); close(secondDone) }()
+	select {
+	case <-secondDone:
+		t.Error("concurrent Close returned before singleton cleanup finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	for _, done := range []chan struct{}{firstDone, secondDone} {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("shutdown did not complete")
+		}
+	}
+	require.Equal(t, 1, closed)
+	require.Empty(t, GetBeanScopes())
+	_, err = RegisterBeanInstance("new", new(string))
+	require.NoError(t, err)
+	require.NoError(t, InitializeContainer())
+}
+
 func TestRequestCloseErrorDoesNotPanic(t *testing.T) {
 	defer resetContainer()
 	closed := make(chan struct{})
