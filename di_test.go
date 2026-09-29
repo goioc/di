@@ -151,6 +151,13 @@ func (suite *TestSuite) TestRegisterNilBeanInstance() {
 	assert.EqualError(suite.T(), err, "bean instance must be a pointer")
 }
 
+func (suite *TestSuite) TestRegisterTypedNilBeanInstance() {
+	var instance *string
+	overwritten, err := RegisterBeanInstance("nil", instance)
+	assert.False(suite.T(), overwritten)
+	assert.EqualError(suite.T(), err, "bean instance must be a pointer")
+}
+
 func (suite *TestSuite) TestRegisterNonReferenceSingletonBeanFactory() {
 	overwritten, err := RegisterBeanFactory("", Singleton, func(context.Context) (interface{}, error) {
 		return "", nil
@@ -181,6 +188,15 @@ func (suite *TestSuite) TestRegisterNilBeanFactory() {
 func (suite *TestSuite) TestRegisterBeanFactoryReturningNil() {
 	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
 		return nil, nil
+	})
+	assert.NoError(suite.T(), err)
+	assert.EqualError(suite.T(), InitializeContainer(), "bean factory must return a non-nil pointer")
+}
+
+func (suite *TestSuite) TestRegisterBeanFactoryReturningTypedNil() {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+		var instance *string
+		return instance, nil
 	})
 	assert.NoError(suite.T(), err)
 	assert.EqualError(suite.T(), InitializeContainer(), "bean factory must return a non-nil pointer")

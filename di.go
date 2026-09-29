@@ -279,9 +279,6 @@ func injectSingletonDependencies() error {
 func injectDependencies(beanID string, instance interface{}, chain map[string]bool) error {
 	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceType := beans[beanID]
-	if instanceType == nil {
-		instanceType = reflect.TypeOf(instance)
-	}
 	instanceElement := instanceType.Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
@@ -354,11 +351,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if err != nil {
 					return err
 				}
-				valueToInject := reflect.ValueOf(instanceToInject)
-				if !valueToInject.Type().AssignableTo(fieldToInject.Type().Elem()) {
-					return errors.New("bean is not assignable to dependency field")
-				}
-				fieldToInject.Index(i).Set(valueToInject)
+				fieldToInject.Index(i).Set(reflect.ValueOf(instanceToInject))
 			}
 		case reflect.Map:
 			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
@@ -382,11 +375,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if err != nil {
 					return err
 				}
-				valueToInject := reflect.ValueOf(instanceToInject)
-				if !valueToInject.Type().AssignableTo(fieldToInject.Type().Elem()) {
-					return errors.New("bean is not assignable to dependency field")
-				}
-				fieldToInject.SetMapIndex(reflect.ValueOf(beanToInject).Convert(fieldToInject.Type().Key()), valueToInject)
+				fieldToInject.SetMapIndex(reflect.ValueOf(beanToInject).Convert(fieldToInject.Type().Key()), reflect.ValueOf(instanceToInject))
 			}
 		default:
 			return errors.New(unsupportedDependencyType)
