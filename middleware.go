@@ -37,10 +37,9 @@ func Middleware(next http.Handler) http.Handler {
 				}
 				requestContext = context.WithValue(requestContext, BeanKey(beanID), beanInstance)
 				if isCloseable(beanInstance) {
-					go func(ctx context.Context, id string, instance any) {
-						<-ctx.Done()
-						closeBean(id, instance)
-					}(requestContext, beanID, beanInstance)
+					context.AfterFunc(requestContext, func() {
+						closeBean(beanID, beanInstance)
+					})
 				}
 			}
 		}()
