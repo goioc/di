@@ -9,388 +9,313 @@
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/G2G5JUKU7)
 
-## Why DI in Go? Why IoC at all?
-I've been using Dependency Injection in Java for nearly 10 years via [Spring Framework](https://spring.io/). I'm not saying that one can't live without it, but it's proven to be very useful for large enterprise-level applications. You may argue that Go follows a completely different ideology, values different principles and paradigms than Java, and DI is not needed in this better world. And I can even partly agree with that. And yet I decided to create this light-weight Spring-like library for Go. You are free to not use it, after all 🙂
+`di` is a process-wide dependency injection container for Go. Register your
+application's components (called **beans**) by type, instance, or factory, then
+initialize the container. It provides field injection, lifecycle hooks, and
+singleton, prototype, and HTTP request scopes.
 
-## Is it the only DI library for Go?
-No, of course not. There's a bunch of libraries around which serve a similar purpose (I even took inspiration from some of them). The problem is that I was missing something in all of these libraries... Therefore I decided to create Yet Another IoC Container that would rule them all. You are more than welcome to use any other library, for example [this nice project](https://github.com/sarulabs/di). And still, I'd recommend stopping by here 😉
+## Install
 
-## So, how does it work? 
-It's better to show than to describe. Take a look at this toy-example (error-handling is omitted to minimize code snippets):
+Requires Go 1.20 or later.
 
-**services/weather_service.go**
-```go
-package services
-
-import (
-	"io"
-	"net/http"
-)
-
-type WeatherService struct {
-}
-
-func (ws *WeatherService) Weather(city string) (*string, error) {
-	response, err := http.Get("https://wttr.in/" + city)
-	if err != nil {
-		return nil, err
-	}
-	all, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
-	weather := string(all)
-	return &weather, nil
-}
+```sh
+go get github.com/goioc/di
 ```
 
-**controllers/weather_controller.go**
-```go
-package controllers
+## Quick start
 
-import (
-	"di-demo/services"
-	"github.com/goioc/di"
-	"net/http"
-)
+This complete example registers configuration and a service, injects the
+configuration, and checks registration, startup, and lookup errors.
 
-type WeatherController struct {
-	// note that injection works even with unexported fields
-	weatherService *services.WeatherService `di.inject:"weatherService"`
-}
-
-func (wc *WeatherController) Weather(w http.ResponseWriter, r *http.Request) {
-	weather, _ := wc.weatherService.Weather(r.URL.Query().Get("city"))
-	_, _ = w.Write([]byte(*weather))
-}
-```
-
-**init.go**
 ```go
 package main
 
 import (
-	"di-demo/controllers"
-	"di-demo/services"
-	"github.com/goioc/di"
+	"fmt"
+	"log"
 	"reflect"
-)
 
-func init() {
-	_, _ = di.RegisterBean("weatherService", reflect.TypeOf((*services.WeatherService)(nil)))
-	_, _ = di.RegisterBean("weatherController", reflect.TypeOf((*controllers.WeatherController)(nil)))
-	_ = di.InitializeContainer()
-}
-```
-
-**main.go**
-```go
-package main
-
-import (
-	"di-demo/controllers"
 	"github.com/goioc/di"
-	"net/http"
 )
 
-func main() {
-	http.HandleFunc("/weather", func(w http.ResponseWriter, r *http.Request) {
-		di.GetInstance("weatherController").(*controllers.WeatherController).Weather(w, r)
-	})
-	_ = http.ListenAndServe(":8080", nil)
-}
-```
-
-If you run it, you should be able to observe a neat weather forecast at http://localhost:8080/weather?city=London (or for any other city).
-
-Of course, for such a simple example it may look like an overkill. But for larger projects with many interconnected services with complicated business logic, it can really simplify your life!
-
-## Looks nice... Give me some details!
-
-The main component of the library is the [Inversion of Control Container](https://www.martinfowler.com/articles/injection.html) that contains and manages instances of your structures (called "beans").
-
-### Types of beans
-
-- **Singleton**. Exists only in one copy in the container. Every time you retrieve the instance from the container (or every time it's being injected to another bean) - it will be the same instance.
-- **Prototype**. It can exist in multiple copies: a new copy is created upon retrieval from the container (or upon injection into another bean).
-- **Request**. Similar to `Prototype`, however it has a few differences and features (since its lifecycle is bound to a web request):
-   - Can't be injected to other beans.
-   - Can't be manually retrieved from the Container.
-   - `Request` beans are automatically injected to the `context.Context` of a corresponding `http.Request`. 
-   - If a `Request` bean implements `io.Closer`, it will be "closed" upon corresponding request's cancellation.
-
-### Beans registration
-
-For the container to become aware of the beans, one must register them manually (unlike Java, unfortunately, we can't scan classpath to do it automatically, because Go runtime doesn't contain high-level information about types). How can one register beans in the container?
-
-- **By type**. This is described in the example above. A structure is declared with a field tagged with `di.scope:"<scope>"`. This field can be even omitted - in this case, the default scope will be `Singleton`. Then the registration is done like this:
-```go
-di.RegisterBean("beanID", reflect.TypeOf((*YourAwesomeStructure)(nil)))
-```
-
-- **Using pre-created instance**. What if you already have an instance that you want to register as a bean? You can do it like this:
-```go
-di.RegisterBeanInstance("beanID", yourAwesomeInstance)
-```
-For this type of beans, the only supported scope is `Singleton`, because I don't dare to clone your instances to enable prototyping 😅
-
-- **Via bean factory**. If you have a method that is producing instances for you, you can register it as a bean factory:
-```go
-di.RegisterBeanFactory("beanID", Singleton, func(context.Context) (interface{}, error) {
-		return "My awesome string that is going to become a bean!", nil
-	})
-```
-Feel free to use any scope with this method. By the way, you can even lookup other beans within the factory:
-```go
-di.RegisterBeanFactory("beanID", Prototype, func(context.Context) (interface{}, error) {
-		return di.GetInstance("someOtherBeanID"), nil
-	})
-```
-Note that factory-method accepts `context.Context`. It can be useful for request-scoped beans (the HTTP request context is set in this case). For all other beans it will be `context.Background()`.
-
-### Beans initialization
-
-There's a special interface `InitializingBean` that can be implemented to provide your bean with some initialization logic that will be executed after the container is initialized (for `Singleton` beans) or after the `Prototype`/`Request` instance is created. Again, you can also lookup other beans during initialization (since the container is ready by that time):
-
-```go
-type PostConstructBean1 struct {
-	Value string
+type Config struct {
+	Greeting string
 }
 
-func (pcb *PostConstructBean1) PostConstruct() error {
-	pcb.Value = "some content"
-	return nil
+type Greeter struct {
+	Config *Config `di.inject:"config"`
 }
 
-type PostConstructBean2 struct {
-	Scope              Scope `di.scope:"prototype"`
-	PostConstructBean1 *PostConstructBean1
+func (g *Greeter) Greet(name string) string {
+	return g.Config.Greeting + ", " + name + "!"
 }
 
-func (pcb *PostConstructBean2) PostConstruct() error {
-	instance, err := di.GetInstanceSafe("postConstructBean1")
+func run() error {
+	defer di.Close()
+	if _, err := di.RegisterBeanInstance("config", &Config{Greeting: "Hello"}); err != nil {
+		return err
+	}
+	if _, err := di.RegisterBean("greeter", reflect.TypeOf((*Greeter)(nil))); err != nil {
+		return err
+	}
+	if err := di.InitializeContainer(); err != nil {
+		return err
+	}
+	instance, err := di.GetInstanceSafe("greeter")
 	if err != nil {
 		return err
 	}
-	pcb.PostConstructBean1 = instance.(*PostConstructBean1)
+	fmt.Println(instance.(*Greeter).Greet("Go")) // Hello, Go!
 	return nil
 }
-```
 
-### Beans post-processors
-
-The alternative way of initializing beans is using so-called "beans post-processors". Take a look at the example:
-
-```go
-type postprocessedBean struct {
-	a string
-	b string
-}
-
-_, _ := RegisterBean("postprocessedBean", reflect.TypeOf((*postprocessedBean)(nil)))
-
-_ = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
-    instance.(*postprocessedBean).a = "Hello, "
-    return nil
-})
-
-_ = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
-instance.(*postprocessedBean).b = "world!"
-    return nil
-})
-
-_ = InitializeContainer()
-
-instance := GetInstance("postprocessedBean")
-
-postprocessedBean := instance.(*postprocessedBean)
-println(postprocessedBean.a+postprocessedBean.b) // prints out "Hello, world!"
-```
-
-### Beans injection
-
-As was mentioned above, one bean can be injected into another with the `PostConstruct` method. However, the more handy way of doing it is by using a special tag:
-
-```go
-type SingletonBean struct {
-	SomeOtherBean *SomeOtherBean `di.inject:"someOtherBean"`
-}
-```
-
-... or via interface ...
-
-```go
-type SingletonBean struct {
-	SomeOtherBean SomeOtherBeansInterface `di.inject:"someOtherBean"`
-}
-```
-
-Note that you can refer dependencies either by pointer, or by interface, but not by value. And just a reminder: you can't inject `Request` beans.
-
-Sometimes we might want to have optional dependencies. By default, all declared dependencies are considered to be required: if some dependency is not found in the Container, you will get an error. However, you can specify an optional dependency like this:
-
-```go
-type SingletonBean struct {
-	SomeOtherBean *string `di.inject:"someOtherBean" di.optional:"true"`
-}
-```
-
-In this case, if `someOtherBean` is not found in the Container, you will get `nil` injected into this field.
-
-In fact, you don't need a bean ID to preform an injection! Check this out:
-
-```go
-type SingletonBean struct {
-	SomeOtherBean *string `di.inject:""`
-}
-```
-
-In this case, DI will try to find a candidate for the injection automatically (among registered beans of type `*string`). Cool, ain't it? 🤠
-It will panic though if no candidates are found (and if the dependency is not marked as optional), or if there is more than one candidate found. 
-
-Finally, you can inject beans to slices and maps. It works similarly to the ID-less inections above, but injects all candidates that were found:
-
-```go
-type SingletonBean struct {
-	someOtherBeans []*string `di.inject:""`
-}
-```
-
-```go
-type SingletonBean struct {
-	someOtherBeans map[string]*string `di.inject:""`
-}
-```
-
-### Circular dependencies
-
-The problem with all IoC containers is that beans' interconnection may suffer from so-called circular dependencies. Consider this example:
-
-```go
-type CircularBean struct {
-	Scope        Scope         `di.scope:"prototype"`
-	CircularBean *CircularBean `di.inject:"circularBean"`
-}
-```
-
-Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype`/`Request` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸 
-
-## What about middleware?
-
-We have some 😎 Here's an example with [gorilla/mux](https://github.com/gorilla/mux) router (but feel free to use any other router). 
-Basically, it's an extension of the very first example with the weather controller, but this time we add `Request` beans and access them via request's context. 
-Also, this example demonstrates how DI can automatically close resources for you (DB connection in this case). The proper error handling is, again, omitted for simplicity.
-
-**controllers/weather_controller.go**
-```go
-package controllers
-
-import (
-	"database/sql"
-	"di-demo/services"
-	"github.com/goioc/di"
-	"net/http"
-)
-
-type WeatherController struct {
-	// note that injection works even with unexported fields
-	weatherService *services.WeatherService `di.inject:"weatherService"`
-}
-
-func (wc *WeatherController) Weather(w http.ResponseWriter, r *http.Request) {
-	dbConnection := r.Context().Value(di.BeanKey("dbConnection")).(*sql.Conn)
-	city := r.URL.Query().Get("city")
-	_, _ = dbConnection.ExecContext(r.Context(), "insert into log values (?, ?, datetime('now'))", city, r.RemoteAddr)
-	weather, _ := wc.weatherService.Weather(city)
-	_, _ = w.Write([]byte(*weather))
-}
-```
-
-**controllers/index_controller.go**
-```go
-package controllers
-
-import (
-	"database/sql"
-	"fmt"
-	"github.com/goioc/di"
-	"net/http"
-	"strings"
-	"time"
-)
-
-type IndexController struct {
-}
-
-func (ic *IndexController) Log(w http.ResponseWriter, r *http.Request) {
-	dbConnection := r.Context().Value(di.BeanKey("dbConnection")).(*sql.Conn)
-	rows, _ := dbConnection.QueryContext(r.Context(), "select * from log")
-	columns, _ := rows.Columns()
-	_, _ = w.Write([]byte(strings.ToUpper(fmt.Sprintf("Requests log: %v\n\n", columns))))
-	for rows.Next() {
-		var city string
-		var ip string
-		var dateTime time.Time
-		_ = rows.Scan(&city, &ip, &dateTime)
-		_, _ = w.Write([]byte(fmt.Sprintln(city, "\t", ip, "\t", dateTime)))
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
 	}
 }
 ```
 
-**init.go**
+Register everything before startup. Wait for `InitializeContainer()` to succeed
+before starting application goroutines or serving requests. The container is
+shared by the entire process; `di.Close()` clears it for a fresh registration cycle.
+
+## Registration and scopes
+
+| Registration | Accepted input | Scope | Field injection |
+| --- | --- | --- | --- |
+| `RegisterBean` | A pointer-to-struct `reflect.Type` | `di.scope` tag; defaults to singleton | Yes |
+| `RegisterBeanInstance` | An existing non-nil pointer | Singleton | No |
+| `RegisterBeanFactory` | A function returning a non-nil pointer and an error | Explicit argument | No |
+
+All three forms receive lifecycle callbacks and registered postprocessors. A
+valid registration replaces any existing registration with the same ID and
+returns `overwritten == true`. Invalid input leaves the previous registration
+intact. Registration and postprocessor changes are rejected during startup,
+normal operation, rollback, and shutdown.
+
+| Scope | Creation | Cleanup after successful initialization |
+| --- | --- | --- |
+| `di.Singleton` | Once during startup; reused by lookups and injection | `di.Close()` calls `io.Closer.Close`, if implemented |
+| `di.Prototype` | A new instance for each lookup or injection | The caller or consuming bean owns cleanup |
+| `di.Request` | Once per registered ID for each request handled by `di.Middleware` | Middleware starts cleanup on request cancellation or handler return |
+
+For type registration, place a scope tag on any field. The field's value is not
+used or populated by the container:
+
 ```go
-package main
-
-import (
-	"context"
-	"database/sql"
-	"di-demo/controllers"
-	"di-demo/services"
-	"github.com/goioc/di"
-	"os"
-	"reflect"
-)
-
-func init() {
-	_, _ = di.RegisterBean("weatherService", reflect.TypeOf((*services.WeatherService)(nil)))
-	_, _ = di.RegisterBean("indexController", reflect.TypeOf((*controllers.IndexController)(nil)))
-	_, _ = di.RegisterBean("weatherController", reflect.TypeOf((*controllers.WeatherController)(nil)))
-	_, _ = di.RegisterBeanFactory("db", di.Singleton, func(context.Context) (interface{}, error) {
-		_ = os.Remove("./di-demo.db")
-		db, _ := sql.Open("sqlite3", "./di-demo.db")
-		db.SetMaxOpenConns(1)
-		_, _ = db.Exec("create table log ('city' varchar not null, 'ip' varchar not null, 'time' datetime not null)")
-		return db, nil
-	})
-	_, _ = di.RegisterBeanFactory("dbConnection", di.Request, func(ctx context.Context) (interface{}, error) {
-		db, _ := di.GetInstanceSafe("db")
-		return db.(*sql.DB).Conn(ctx)
-	})
-	_ = di.InitializeContainer()
+type Job struct {
+	_ di.Scope `di.scope:"prototype"`
 }
 ```
 
-**main.go**
+A factory is useful when construction needs arguments or can fail:
+
 ```go
-package main
+func registerMessage() error {
+	_, err := di.RegisterBeanFactory("message", di.Prototype, func(context.Context) (interface{}, error) {
+		value := "Hello from a factory"
+		return &value, nil
+	})
+	return err
+}
+```
+
+Import `context` for this snippet. Factories can use `di.GetInstanceSafe` to look
+up other beans. Request factories receive a context derived from the HTTP
+request; other scopes receive `context.Background()`. If a factory fails, it
+must release resources it created but did not return successfully, including any value
+returned alongside a non-nil error.
+
+## Field injection
+
+Use `di.inject` on pointer or interface fields, including unexported fields.
+An explicit ID selects one registration; an empty tag selects the unique
+registered type assignable to the field:
+
+```go
+type Service struct {
+	Config  *Config           `di.inject:"config"`
+	Logger  Logger            `di.inject:""`
+	Metrics *Metrics          `di.inject:"metrics" di.optional:"true"`
+	Plugins []Plugin          `di.inject:""`
+	ByID    map[string]Plugin `di.inject:""`
+}
+```
+
+Here `Logger` and `Plugin` are application-defined interfaces and `Metrics` is
+an application-defined struct. The rules are:
+
+- Pointer and interface fields require one matching bean. Missing or ambiguous
+  matches return an initialization error.
+- `di.optional:"true"` permits a missing bean and leaves the field unchanged
+  (normally nil). It does not suppress ambiguity, type errors, or construction
+  and initialization errors.
+- Slices and maps collect all assignable registered types. Elements must be
+  pointers or interfaces; map keys must have string kind. Slices are ordered by
+  bean ID, and map keys are bean IDs. A collection with no candidates is empty;
+  an optional collection with no candidates remains unchanged.
+- Collection matching uses the element type, regardless of the `di.inject` tag's
+  value. Use an empty tag to express this clearly.
+- Factory result types are unknown at registration, so factories require an
+  explicit ID for injection and are excluded from automatic type matching.
+- Request beans cannot be injected into other beans or retrieved with
+  `GetInstance` or `GetInstanceSafe`; use the HTTP request context instead.
+
+Supplied instances and factory results do **not** receive field injection. Set
+up their fields yourself before returning or registering them.
+
+## Initialization and lifecycle hooks
+
+The container wires the dependency graph, initializes field dependencies, and
+then invokes each bean's callbacks in this order:
+
+1. `SetContext(context.Context)`, if it implements `di.ContextAwareBean`.
+2. `PostConstruct() error`, if it implements `di.InitializingBean`.
+3. Registered postprocessors, in registration order, for the bean's exact runtime type.
+
+An error stops initialization. For example, a bean can validate its injected
+configuration before application work begins:
+
+```go
+func (g *Greeter) PostConstruct() error {
+	if g.Config.Greeting == "" {
+		return fmt.Errorf("greeting must not be empty")
+	}
+	return nil
+}
+```
+
+To initialize a type you cannot modify, register a postprocessor before startup:
+
+```go
+func registerConfigDefaults() error {
+	return di.RegisterBeanPostprocessor(reflect.TypeOf((*Config)(nil)), func(instance interface{}) error {
+		config := instance.(*Config)
+		if config.Greeting == "" {
+			config.Greeting = "Hello"
+		}
+		return nil
+	})
+}
+```
+
+Independent startup roots and type-matching candidates are visited in sorted
+bean-ID order. Dependencies take precedence over that order. Field injection
+waits for an unrelated dependency's initialization to finish, including when a
+startup callback launched its initialization in another goroutine. Startup also
+waits for admitted lookups and checks every singleton's final result before
+returning success.
+
+### Cycles and callback lookups
+
+Singleton field-injection cycles are supported: references are wired before
+hooks run, but cycle members cannot assume each other's hooks have completed.
+Tagged cycles requiring repeated creation of a prototype return an error.
+
+Factories and hooks can look up beans during startup, including retrieving a
+singleton from its own hook. These manual lookups may expose an in-progress
+singleton. A lookup that re-enters unfinished singleton construction returns an
+error. Cycles formed by manual lookups inside callbacks are **not detected** and
+must be avoided. Application goroutines must wait for successful startup.
+
+### Failure and cleanup
+
+If startup fails, the container closes beans it created during that attempt and
+retains registrations for retry. Supplied instances are retained; their hooks
+can run again on retry. Failed prototype or request resolutions close newly
+created beans in their dependency graph. Failed request contexts are canceled
+before cleanup, so closers can wait for context-bound work to stop.
+
+Cleanup invokes `io.Closer.Close` where implemented. Returned cleanup errors are
+logged without replacing the initialization error. Panics from factories and
+callbacks propagate; `GetInstanceSafe` returns ordinary lookup errors but does
+not recover callback panics. `GetInstance` panics on lookup errors as well.
+
+After successful startup, prototypes remain the caller's or consuming bean's
+responsibility, including prototypes injected into singletons or request beans.
+Factory results that compare equal to a supplied singleton share its cleanup
+ownership, including zero-sized values; shutdown closes that shared instance once.
+
+### Shutdown
+
+Stop application work before calling `di.Close()`. It waits for startup or
+rollback, rejects new lookups once shutdown begins, waits for active lookups,
+and closes singletons in reverse initialization order. Concurrent callers wait
+for the same shutdown and container reset. All registrations and postprocessors
+are cleared afterward. Supplied instances can also be closed before startup.
+
+Returned beans can outlive the lookup that created them. Drain handlers and
+background workers, and coordinate outstanding asynchronous request cleanup,
+before closing shared singleton resources.
+
+Do not call or wait for `di.Close()` inside a factory, context setter,
+initialization hook, postprocessor, or bean closer: shutdown would be waiting
+for that callback to finish. `GetBeanTypes()` and `GetBeanScopes()` are safe to
+call from callbacks and return copies of the registration maps. Factory
+registrations appear only in `GetBeanScopes()`.
+
+## HTTP request scope
+
+Wrap a standard `http.Handler` with `di.Middleware`. It creates every request
+bean in sorted bean-ID order and puts it in the request context under
+`di.BeanKey(beanID)`. This example measures elapsed time from bean initialization:
+
+```go
+package requestexample
 
 import (
-	"di-demo/controllers"
-	"github.com/goioc/di"
-	"github.com/gorilla/mux"
-	_ "github.com/mattn/go-sqlite3"
+	"fmt"
+	"log"
 	"net/http"
+	"reflect"
+	"time"
+
+	"github.com/goioc/di"
 )
 
-func main() {
-	router := mux.NewRouter()
-	router.Use(di.Middleware)
-	router.Path("/").HandlerFunc(di.GetInstance("indexController").(*controllers.IndexController).Log)
-	router.Path("/weather").Queries("city", "{*?}").HandlerFunc(di.GetInstance("weatherController").(*controllers.WeatherController).Weather)
-	_ = http.ListenAndServe(":8080", router)
+type RequestInfo struct {
+	_       di.Scope `di.scope:"request"`
+	Started time.Time
+}
+
+func (info *RequestInfo) PostConstruct() error {
+	info.Started = time.Now()
+	return nil
+}
+
+func Handler() (http.Handler, error) {
+	if _, err := di.RegisterBean("requestInfo", reflect.TypeOf((*RequestInfo)(nil))); err != nil {
+		return nil, err
+	}
+	if err := di.InitializeContainer(); err != nil {
+		return nil, err
+	}
+	return di.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		info := r.Context().Value(di.BeanKey("requestInfo")).(*RequestInfo)
+		if _, err := fmt.Fprintf(w, "Request elapsed: %s\n", time.Since(info.Started)); err != nil {
+			log.Printf("write response: %v", err)
+		}
+	})), nil
 }
 ```
 
-## Okaaay... More examples?
+Call `Handler` once during application startup, after registering any shared
+beans. The application owns the HTTP server's shutdown and the final `di.Close()`.
 
-Please, take a look at the [unit-tests](https://github.com/goioc/di/blob/master/di_test.go) for more examples.
+Successful request beans implementing `io.Closer` are closed asynchronously
+when the request is canceled or the wrapped handler returns. Middleware does
+not wait for those closers or cancel the caller's original request context.
+Request construction and initialization errors panic in the handler goroutine;
+place recovery middleware outside `di.Middleware` if you want to handle them.
+
+## Development
+
+```sh
+go test -race -count=2 ./...
+go vet ./...
+```
+
+See the [tests](di_test.go) for more injection examples and the
+[API reference](https://pkg.go.dev/github.com/goioc/di) for function documentation.
+Licensed under the [MIT License](LICENSE).
