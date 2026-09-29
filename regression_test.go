@@ -75,9 +75,9 @@ func TestRequestBeanPrototypeDependencyReceivesRequestContext(t *testing.T) {
 		Scope Scope     `di.scope:"request"`
 		Dep   *ctxProbe `di.inject:"probe"`
 	}
-	_, err := RegisterBean("probe", reflect.TypeOf((*ctxProbe)(nil)))
+	_, err := RegisterBean("probe", reflect.TypeFor[*ctxProbe]())
 	require.NoError(t, err)
-	_, err = RegisterBean("request", reflect.TypeOf((*requestBean)(nil)))
+	_, err = RegisterBean("request", reflect.TypeFor[*requestBean]())
 	require.NoError(t, err)
 	require.NoError(t, InitializeContainer())
 
@@ -87,8 +87,7 @@ func TestRequestBeanPrototypeDependencyReceivesRequestContext(t *testing.T) {
 		probe = rb.Dep
 	}))
 
-	parent, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	parent := t.Context()
 	parent = context.WithValue(parent, BeanKey("marker"), "request-value")
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil).WithContext(parent))
 

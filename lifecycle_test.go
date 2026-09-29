@@ -25,7 +25,7 @@ func TestContextBeforeInit(t *testing.T) {
 	for _, scope := range []Scope{Singleton, Prototype, Request} {
 		t.Run(string(scope), func(t *testing.T) {
 			defer resetContainer()
-			_, _ = RegisterBeanFactory("bean", scope, func(context.Context) (interface{}, error) { return &lifecycleContextBean{}, nil })
+			_, _ = RegisterBeanFactory("bean", scope, func(context.Context) (any, error) { return &lifecycleContextBean{}, nil })
 			err := InitializeContainer()
 			if err == nil && scope == Prototype {
 				_, err = GetInstanceSafe("bean")
@@ -52,8 +52,8 @@ type lifecycleLookupRoot struct {
 func TestPrototypeStartupLookup(t *testing.T) {
 	defer resetContainer()
 	_, _ = RegisterBeanInstance("dep", new(string))
-	_, _ = RegisterBean("child", reflect.TypeOf((*lifecycleLookupPrototype)(nil)))
-	_, _ = RegisterBean("root", reflect.TypeOf((*lifecycleLookupRoot)(nil)))
+	_, _ = RegisterBean("child", reflect.TypeFor[*lifecycleLookupPrototype]())
+	_, _ = RegisterBean("root", reflect.TypeFor[*lifecycleLookupRoot]())
 	if err := InitializeContainer(); err != nil {
 		t.Errorf("injected prototype cannot perform documented PostConstruct lookup: %v", err)
 	}
@@ -76,10 +76,10 @@ func (b *lifecycleInitializationConsumer) PostConstruct() error {
 func TestDependencyInitializationOrder(t *testing.T) {
 	defer resetContainer()
 	failures := 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resetContainer()
-		_, _ = RegisterBean("consumer", reflect.TypeOf((*lifecycleInitializationConsumer)(nil)))
-		_, _ = RegisterBean("dependency", reflect.TypeOf((*lifecycleInitializedDependency)(nil)))
+		_, _ = RegisterBean("consumer", reflect.TypeFor[*lifecycleInitializationConsumer]())
+		_, _ = RegisterBean("dependency", reflect.TypeFor[*lifecycleInitializedDependency]())
 		if err := InitializeContainer(); err != nil {
 			failures++
 		}
@@ -104,7 +104,7 @@ func (b *lifecycleResource) Close() error { b.closed = true; return nil }
 func TestRetryResourceLeak(t *testing.T) {
 	defer resetContainer()
 	var resources []*lifecycleResource
-	_, _ = RegisterBeanFactory("resource", Singleton, func(context.Context) (interface{}, error) {
+	_, _ = RegisterBeanFactory("resource", Singleton, func(context.Context) (any, error) {
 		b := &lifecycleResource{fail: len(resources) == 0}
 		resources = append(resources, b)
 		return b, nil
@@ -126,7 +126,7 @@ func TestRetryResourceLeak(t *testing.T) {
 func TestFailedRequestCleanup(t *testing.T) {
 	defer resetContainer()
 	b := &lifecycleResource{fail: true}
-	_, _ = RegisterBeanFactory("resource", Request, func(context.Context) (interface{}, error) { return b, nil })
+	_, _ = RegisterBeanFactory("resource", Request, func(context.Context) (any, error) { return b, nil })
 	if err := InitializeContainer(); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestFailedRequestCancelsBeforeCleanup(t *testing.T) {
 			defer cancel()
 			failure := errors.New(failureMode)
 			closed := make(chan struct{})
-			_, err := RegisterBeanFactory("request", Request, func(ctx context.Context) (interface{}, error) {
+			_, err := RegisterBeanFactory("request", Request, func(ctx context.Context) (any, error) {
 				return &callbackBean{
 					initHook: func() error {
 						switch failureMode {
@@ -166,10 +166,10 @@ func TestFailedRequestCancelsBeforeCleanup(t *testing.T) {
 			})
 			require.NoError(t, err)
 			if failureMode == "postprocessor error" {
-				require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*callbackBean)(nil)), func(interface{}) error { return failure }))
+				require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*callbackBean](), func(any) error { return failure }))
 			}
 			require.NoError(t, InitializeContainer())
-			done := make(chan interface{}, 1)
+			done := make(chan any, 1)
 			go func() {
 				defer func() { done <- recover() }()
 				Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -199,7 +199,7 @@ func TestSuccessfulRequestContextLivesUntilHandlerReturns(t *testing.T) {
 	defer resetContainer()
 	var requestContext context.Context
 	closed := make(chan struct{})
-	_, err := RegisterBeanFactory("request", Request, func(ctx context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("request", Request, func(ctx context.Context) (any, error) {
 		requestContext = ctx
 		return &callbackBean{closeHook: func() error { <-ctx.Done(); close(closed); return nil }}, nil
 	})
@@ -219,7 +219,7 @@ func TestSuccessfulRequestContextLivesUntilHandlerReturns(t *testing.T) {
 func TestSingletonFactoryLookup(t *testing.T) {
 	defer resetContainer()
 	_, _ = RegisterBeanInstance("dep", new(string))
-	_, _ = RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) { return GetInstanceSafe("dep") })
+	_, _ = RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) { return GetInstanceSafe("dep") })
 	if err := InitializeContainer(); err != nil {
 		t.Errorf("singleton factory cannot lookup registered instance: %v", err)
 	}

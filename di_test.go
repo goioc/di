@@ -81,7 +81,7 @@ func (suite *TestSuite) TestBeanIsNotRegistered() {
 
 func (suite *TestSuite) TestBeanFactoryCalledOnce() {
 	var countOfCalls = 0
-	overwritten, err := RegisterBeanFactory("beanId", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("beanId", Singleton, func(context.Context) (any, error) {
 		countOfCalls++
 		return new(string), nil
 	})
@@ -101,7 +101,7 @@ func (suite *TestSuite) TestRegisterBeanPostprocessorAfterContainerInitializatio
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("container is already initialized: can't register bean postprocessor")
-	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), nil)
+	err = RegisterBeanPostprocessor(reflect.TypeFor[*string](), nil)
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
@@ -109,7 +109,7 @@ func (suite *TestSuite) TestRegisterBeanPostprocessorAfterContainerInitializatio
 
 func (suite *TestSuite) TestRegisterNonReferenceBean() {
 	expectedError := errors.New("bean type must be a pointer")
-	overwritten, err := RegisterBean("", reflect.TypeOf(""))
+	overwritten, err := RegisterBean("", reflect.TypeFor[string]())
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
@@ -145,7 +145,7 @@ func (suite *TestSuite) TestRegisterTypedNilBeanInstance() {
 }
 
 func (suite *TestSuite) TestRegisterNonReferenceSingletonBeanFactory() {
-	overwritten, err := RegisterBeanFactory("", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("", Singleton, func(context.Context) (any, error) {
 		return "", nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -158,7 +158,7 @@ func (suite *TestSuite) TestRegisterNonReferenceSingletonBeanFactory() {
 }
 
 func (suite *TestSuite) TestRegisterBeanFactoryWithUnsupportedScope() {
-	overwritten, err := RegisterBeanFactory("bean", Scope("invalid"), func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("bean", Scope("invalid"), func(context.Context) (any, error) {
 		return new(string), nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -172,7 +172,7 @@ func (suite *TestSuite) TestRegisterNilBeanFactory() {
 }
 
 func (suite *TestSuite) TestRegisterBeanFactoryReturningNil() {
-	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		return nil, nil
 	})
 	assert.NoError(suite.T(), err)
@@ -180,7 +180,7 @@ func (suite *TestSuite) TestRegisterBeanFactoryReturningNil() {
 }
 
 func (suite *TestSuite) TestRegisterBeanFactoryReturningTypedNil() {
-	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		var instance *string
 		return instance, nil
 	})
@@ -189,7 +189,7 @@ func (suite *TestSuite) TestRegisterBeanFactoryReturningTypedNil() {
 }
 
 func (suite *TestSuite) TestRegisterNonReferencePrototypeBeanFactory() {
-	overwritten, err := RegisterBeanFactory("", Prototype, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("", Prototype, func(context.Context) (any, error) {
 		return "", nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -209,7 +209,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanUnsupportedScope() {
 		Scope Scope `di.scope:"invalid"`
 	}
 	expectedError := errors.New("unsupported scope: invalid")
-	overwritten, err := RegisterBean("", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
@@ -221,7 +221,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanNonReferenceDependency() {
 		SomeOtherBean string `di.inject:"someOtherBean"`
 	}
 	expectedError := errors.New(unsupportedDependencyType)
-	overwritten, err := RegisterBean("", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
@@ -232,7 +232,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanWrongOptionalValue() {
 	type SingletonBean struct {
 		SomeOtherBean *string `di.inject:"someOtherBean" di.optional:"fls"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("invalid di.optional value: fls")
@@ -246,7 +246,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanMissingImplicitlyRequiredDepend
 	type SingletonBean struct {
 		SomeOtherBean *string `di.inject:"someOtherBean"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("no dependency found")
@@ -260,7 +260,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanMissingExplicitlyRequiredDepend
 	type SingletonBean struct {
 		SomeOtherBean *string `di.inject:"someOtherBean" di.optional:"false"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("no dependency found")
@@ -274,7 +274,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanMissingOptionalDependency() {
 	type SingletonBean struct {
 		SomeOtherBean *string `di.inject:"someOtherBean" di.optional:"true"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -297,10 +297,10 @@ func (suite *TestSuite) TestRegisterBeanWithOverwriting() {
 	}
 	type Bean2 struct {
 	}
-	overwritten, err := RegisterBean("bean", reflect.TypeOf((*Bean1)(nil)))
+	overwritten, err := RegisterBean("bean", reflect.TypeFor[*Bean1]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("bean", reflect.TypeOf((*Bean2)(nil)))
+	overwritten, err = RegisterBean("bean", reflect.TypeFor[*Bean2]())
 	assert.True(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -316,10 +316,10 @@ func (suite *TestSuite) TestRegisterBeanWithOverwritingFromSingletonToPrototypeS
 	type PrototypeBean struct {
 		Scope Scope `di.scope:"prototype"`
 	}
-	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("bean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("bean", reflect.TypeOf((*PrototypeBean)(nil)))
+	overwritten, err = RegisterBean("bean", reflect.TypeFor[*PrototypeBean]())
 	assert.True(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -333,7 +333,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanImplicitScope() {
 	type SingletonBean struct {
 		someField string
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -347,7 +347,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanExplicitScope() {
 	type SingletonBean struct {
 		Scope Scope `di.scope:"singleton"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -369,7 +369,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanInstance() {
 }
 
 func (suite *TestSuite) TestRegisterSingletonBeanFactoryWithError() {
-	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func(context.Context) (any, error) {
 		return nil, errors.New("error in the bean factory")
 	})
 	assert.False(suite.T(), overwritten)
@@ -382,7 +382,7 @@ func (suite *TestSuite) TestRegisterSingletonBeanFactoryWithError() {
 }
 
 func (suite *TestSuite) TestRegisterSingletonBeanFactory() {
-	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("singletonBean", Singleton, func(context.Context) (any, error) {
 		return new(string), nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -408,7 +408,7 @@ func (suite *TestSuite) TestRegisterPrototypeBean() {
 	type PrototypeBean struct {
 		Scope Scope `di.scope:"prototype"`
 	}
-	overwritten, err := RegisterBean("prototypeBean", reflect.TypeOf((*PrototypeBean)(nil)))
+	overwritten, err := RegisterBean("prototypeBean", reflect.TypeFor[*PrototypeBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -419,7 +419,7 @@ func (suite *TestSuite) TestRegisterPrototypeBean() {
 }
 
 func (suite *TestSuite) TestRegisterPrototypeBeanFactoryWithError() {
-	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func(context.Context) (any, error) {
 		return nil, errors.New("error in the bean factory")
 	})
 	assert.False(suite.T(), overwritten)
@@ -435,7 +435,7 @@ func (suite *TestSuite) TestRegisterPrototypeBeanFactoryWithError() {
 }
 
 func (suite *TestSuite) TestRegisterPrototypeBeanFactory() {
-	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("prototypeBean", Prototype, func(context.Context) (any, error) {
 		return new(string), nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -459,7 +459,7 @@ func (suite *TestSuite) TestInjectSlice() {
 	type BeanWithSlice struct {
 		strings *[]string `di.inject:"strings"`
 	}
-	overwritten, err = RegisterBean("beanWithSlice", reflect.TypeOf((*BeanWithSlice)(nil)))
+	overwritten, err = RegisterBean("beanWithSlice", reflect.TypeFor[*BeanWithSlice]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -482,7 +482,7 @@ func (suite *TestSuite) TestInjectMap() {
 	type BeanWithMap struct {
 		dict *map[string]string `di.inject:"dict"`
 	}
-	overwritten, err = RegisterBean("beanWithMap", reflect.TypeOf((*BeanWithMap)(nil)))
+	overwritten, err = RegisterBean("beanWithMap", reflect.TypeFor[*BeanWithMap]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -498,13 +498,13 @@ func (suite *TestSuite) TestInjectMap() {
 }
 
 func (suite *TestSuite) TestInjectBeanFactory() {
-	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("beanFactory", Singleton, func(context.Context) (any, error) {
 		s := "test"
 		return &s, nil
 	})
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("beanWithInjectedBeanFactory", reflect.TypeOf((*beanWithInjectedBeanFactory)(nil)))
+	overwritten, err = RegisterBean("beanWithInjectedBeanFactory", reflect.TypeFor[*beanWithInjectedBeanFactory]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -519,11 +519,11 @@ func (suite *TestSuite) TestInjectBeanFactory() {
 func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromBeanToBeanFactory() {
 	type SingletonBean struct {
 	}
-	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("bean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	factoryCalls := 0
-	overwritten, err = RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err = RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		factoryCalls++
 		s := "test_overwritten"
 		return &s, nil
@@ -544,10 +544,10 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromPrototypeToSin
 	type PrototypeBean struct {
 		Scope Scope `di.scope:"prototype"`
 	}
-	overwritten, err := RegisterBean("bean", reflect.TypeOf((*PrototypeBean)(nil)))
+	overwritten, err := RegisterBean("bean", reflect.TypeFor[*PrototypeBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err = RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		s := "test_overwritten"
 		return &s, nil
 	})
@@ -566,7 +566,7 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromPrototypeToSin
 }
 
 func (suite *TestSuite) TestBeanFunction() {
-	overwritten, err := RegisterBeanFactory("beanFunction", Singleton, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("beanFunction", Singleton, func(context.Context) (any, error) {
 		f := func(x int) int {
 			return x + 42
 		}
@@ -591,7 +591,7 @@ func (*failingSingletonBean) PostConstruct() error {
 }
 
 func (suite *TestSuite) TestSingletonPostConstructReturnsError() {
-	overwritten, err := RegisterBean("failingSingletonBean", reflect.TypeOf((*failingSingletonBean)(nil)))
+	overwritten, err := RegisterBean("failingSingletonBean", reflect.TypeFor[*failingSingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("error message")
@@ -606,7 +606,7 @@ func (suite *TestSuite) TestFailedInitializationCanBeRetried() {
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	postprocessCalls := 0
-	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), func(interface{}) error {
+	err = RegisterBeanPostprocessor(reflect.TypeFor[*string](), func(any) error {
 		postprocessCalls++
 		if postprocessCalls == 1 {
 			return errors.New("temporary initialization failure")
@@ -634,7 +634,7 @@ func (*failingPrototypeBean) PostConstruct() error {
 }
 
 func (suite *TestSuite) TestPrototypePostConstructReturnsError() {
-	overwritten, err := RegisterBean("failingPrototypeBean", reflect.TypeOf((*failingPrototypeBean)(nil)))
+	overwritten, err := RegisterBean("failingPrototypeBean", reflect.TypeFor[*failingPrototypeBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -684,13 +684,13 @@ func (pcb *postConstructBean3) PostConstruct() error {
 }
 
 func (suite *TestSuite) TestPostConstruct() {
-	overwritten, err := RegisterBean("postConstructBean1", reflect.TypeOf((*postConstructBean1)(nil)))
+	overwritten, err := RegisterBean("postConstructBean1", reflect.TypeFor[*postConstructBean1]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("postConstructBean2", reflect.TypeOf((*postConstructBean2)(nil)))
+	overwritten, err = RegisterBean("postConstructBean2", reflect.TypeFor[*postConstructBean2]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("postConstructBean3", reflect.TypeOf((*postConstructBean3)(nil)))
+	overwritten, err = RegisterBean("postConstructBean3", reflect.TypeFor[*postConstructBean3]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -703,7 +703,7 @@ func (suite *TestSuite) TestBeanPostprocessorReturnsError() {
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("some error")
-	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), func(instance interface{}) error {
+	err = RegisterBeanPostprocessor(reflect.TypeFor[*string](), func(instance any) error {
 		return expectedError
 	})
 	assert.Nil(suite.T(), err)
@@ -719,15 +719,15 @@ type postprocessedBean struct {
 }
 
 func (suite *TestSuite) TestBeanPostprocessors() {
-	overwritten, err := RegisterBean("postprocessedBean", reflect.TypeOf((*postprocessedBean)(nil)))
+	overwritten, err := RegisterBean("postprocessedBean", reflect.TypeFor[*postprocessedBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	err = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
+	err = RegisterBeanPostprocessor(reflect.TypeFor[*postprocessedBean](), func(instance any) error {
 		instance.(*postprocessedBean).a = "Hello, "
 		return nil
 	})
 	assert.Nil(suite.T(), err)
-	err = RegisterBeanPostprocessor(reflect.TypeOf((*postprocessedBean)(nil)), func(instance interface{}) error {
+	err = RegisterBeanPostprocessor(reflect.TypeFor[*postprocessedBean](), func(instance any) error {
 		instance.(*postprocessedBean).b = "world!"
 		return nil
 	})
@@ -747,7 +747,7 @@ type circularBean struct {
 }
 
 func (suite *TestSuite) TestDirectCircularDependency() {
-	overwritten, err := RegisterBean("circularBean", reflect.TypeOf((*circularBean)(nil)))
+	overwritten, err := RegisterBean("circularBean", reflect.TypeFor[*circularBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -772,11 +772,11 @@ func (suite *TestSuite) TestSharedPrototypeDependencyIsNotCircular() {
 		Child *Child `di.inject:"child"`
 		Leaf  *Leaf  `di.inject:"leaf"`
 	}
-	_, err := RegisterBean("root", reflect.TypeOf((*Root)(nil)))
+	_, err := RegisterBean("root", reflect.TypeFor[*Root]())
 	assert.NoError(suite.T(), err)
-	_, err = RegisterBean("child", reflect.TypeOf((*Child)(nil)))
+	_, err = RegisterBean("child", reflect.TypeFor[*Child]())
 	assert.NoError(suite.T(), err)
-	_, err = RegisterBean("leaf", reflect.TypeOf((*Leaf)(nil)))
+	_, err = RegisterBean("leaf", reflect.TypeFor[*Leaf]())
 	assert.NoError(suite.T(), err)
 	assert.NoError(suite.T(), InitializeContainer())
 	root := GetInstance("root").(*Root)
@@ -789,9 +789,9 @@ func (suite *TestSuite) TestFactoryCanLookupPrototypeBean() {
 	type PrototypeBean struct {
 		Scope Scope `di.scope:"prototype"`
 	}
-	_, err := RegisterBean("prototype", reflect.TypeOf((*PrototypeBean)(nil)))
+	_, err := RegisterBean("prototype", reflect.TypeFor[*PrototypeBean]())
 	assert.NoError(suite.T(), err)
-	_, err = RegisterBeanFactory("factory", Prototype, func(context.Context) (interface{}, error) {
+	_, err = RegisterBeanFactory("factory", Prototype, func(context.Context) (any, error) {
 		if _, err := GetInstanceSafe("prototype"); err != nil {
 			return nil, err
 		}
@@ -810,7 +810,7 @@ func (suite *TestSuite) TestInjectByTypeNoCandidatesMandatory() {
 	type SingletonBean struct {
 		OtherBean *OtherBean `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New("no candidates found for the injection")
@@ -826,7 +826,7 @@ func (suite *TestSuite) TestInjectByTypeNoCandidatesOptional() {
 	type SingletonBean struct {
 		OtherBean *OtherBean `di.inject:"" di.optional:"true"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -842,7 +842,7 @@ func (suite *TestSuite) TestInjectByTypeMoreThanOneCandidate() {
 	type SingletonBean struct {
 		RequestBean *OtherBean `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	overwritten, err = RegisterBeanInstance("candidate1", &OtherBean{})
@@ -864,10 +864,10 @@ func (suite *TestSuite) TestInjectByTypeWithType() {
 	type SingletonBean struct {
 		OtherBean *OtherBean `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*OtherBean)(nil)))
+	overwritten, err = RegisterBean("otherBean", reflect.TypeFor[*OtherBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -891,10 +891,10 @@ func (suite *TestSuite) TestInjectByTypeWithInterface() {
 	type SingletonBean struct {
 		otherBean someInterface `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*otherBean)(nil)))
+	overwritten, err = RegisterBean("otherBean", reflect.TypeFor[*otherBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -908,10 +908,10 @@ func (suite *TestSuite) TestInjectByIDWithInterface() {
 	type SingletonBean struct {
 		otherBean someInterface `di.inject:"otherBean"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*otherBean)(nil)))
+	overwritten, err = RegisterBean("otherBean", reflect.TypeFor[*otherBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -927,9 +927,9 @@ func (suite *TestSuite) TestInjectByIDWithIncompatibleTypeReturnsError() {
 	type Holder struct {
 		Value *Expected `di.inject:"actual"`
 	}
-	_, err := RegisterBean("holder", reflect.TypeOf((*Holder)(nil)))
+	_, err := RegisterBean("holder", reflect.TypeFor[*Holder]())
 	assert.NoError(suite.T(), err)
-	_, err = RegisterBean("actual", reflect.TypeOf((*Actual)(nil)))
+	_, err = RegisterBean("actual", reflect.TypeFor[*Actual]())
 	assert.NoError(suite.T(), err)
 	assert.EqualError(suite.T(), InitializeContainer(), "bean is not assignable to dependency field")
 }
@@ -939,7 +939,7 @@ func (suite *TestSuite) TestMapInjectionRejectsNonStringKey() {
 	type Holder struct {
 		Values map[int]*Dependency `di.inject:""`
 	}
-	_, err := RegisterBean("holder", reflect.TypeOf((*Holder)(nil)))
+	_, err := RegisterBean("holder", reflect.TypeFor[*Holder]())
 	assert.EqualError(suite.T(), err, unsupportedDependencyType)
 }
 
@@ -949,7 +949,7 @@ func (suite *TestSuite) TestInjectToSliceWithTypeNoCandidatesNotOptional() {
 	type SingletonBean struct {
 		OtherBeans []*OtherBean `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -966,7 +966,7 @@ func (suite *TestSuite) TestInjectToSliceWithTypeNoCandidatesOptional() {
 	type SingletonBean struct {
 		OtherBeans []*OtherBean `di.inject:"" di.optional:"true"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -982,10 +982,10 @@ func (suite *TestSuite) TestInjectToSliceWithType() {
 	type SingletonBean struct {
 		OtherBeans []*OtherBean `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*OtherBean)(nil)))
+	overwritten, err = RegisterBean("otherBean", reflect.TypeFor[*OtherBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1000,10 +1000,10 @@ func (suite *TestSuite) TestInjectToSliceWithInterface() {
 	type SingletonBean struct {
 		otherBeans []someInterface `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*otherBean)(nil)))
+	overwritten, err = RegisterBean("otherBean", reflect.TypeFor[*otherBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1020,7 +1020,7 @@ func (suite *TestSuite) TestInjectToMapWithTypeNoCandidatesNotOptional() {
 	type SingletonBean struct {
 		OtherBeans map[string]*OtherBean `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1037,7 +1037,7 @@ func (suite *TestSuite) TestInjectToMapWithTypeNoCandidatesOptional() {
 	type SingletonBean struct {
 		OtherBeans map[string]*OtherBean `di.inject:"" di.optional:"true"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1053,10 +1053,10 @@ func (suite *TestSuite) TestInjectToMapWithType() {
 	type SingletonBean struct {
 		OtherBeans map[string]*OtherBean `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*OtherBean)(nil)))
+	overwritten, err = RegisterBean("otherBean", reflect.TypeFor[*OtherBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1072,10 +1072,10 @@ func (suite *TestSuite) TestInjectToMapWithInterface() {
 	type SingletonBean struct {
 		otherBeans map[string]someInterface `di.inject:""`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("otherBean", reflect.TypeOf((*otherBean)(nil)))
+	overwritten, err = RegisterBean("otherBean", reflect.TypeFor[*otherBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1094,10 +1094,10 @@ func (suite *TestSuite) TestInjectRequestBean() {
 	type SingletonBean struct {
 		RequestBean *RequestBean `di.inject:"requestBean"`
 	}
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("requestBean", reflect.TypeOf((*RequestBean)(nil)))
+	overwritten, err = RegisterBean("requestBean", reflect.TypeFor[*RequestBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	expectedError := errors.New(requestScopedBeansCantBeInjected)
@@ -1111,7 +1111,7 @@ func (suite *TestSuite) TestRequestBeanRetrieval() {
 	type RequestBean struct {
 		Scope Scope `di.scope:"request"`
 	}
-	overwritten, err := RegisterBean("requestBean", reflect.TypeOf((*RequestBean)(nil)))
+	overwritten, err := RegisterBean("requestBean", reflect.TypeFor[*RequestBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1128,7 +1128,7 @@ func (suite *TestSuite) TestRequestBeanRetrieval() {
 }
 
 func (suite *TestSuite) TestFailRequestBeanRetrieval() {
-	overwritten, err := RegisterBeanFactory("requestBean", Request, func(context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("requestBean", Request, func(context.Context) (any, error) {
 		return nil, errors.New("cannot initialize request bean")
 	})
 	assert.False(suite.T(), overwritten)
@@ -1149,7 +1149,7 @@ func (cab *contextAwareBean) SetContext(ctx context.Context) {
 }
 
 func (suite *TestSuite) TestContextAwareBean() {
-	overwritten, err := RegisterBean("contextAwareBean", reflect.TypeOf((*contextAwareBean)(nil)))
+	overwritten, err := RegisterBean("contextAwareBean", reflect.TypeFor[*contextAwareBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -1162,7 +1162,7 @@ func (suite *TestSuite) TestContextAwareBean() {
 
 func (suite *TestSuite) TestContextAwareBeanFactory() {
 	var outerCtx context.Context
-	overwritten, err := RegisterBeanFactory("beanId", Singleton, func(ctx context.Context) (interface{}, error) {
+	overwritten, err := RegisterBeanFactory("beanId", Singleton, func(ctx context.Context) (any, error) {
 		outerCtx = ctx
 		return new(string), nil
 	})
@@ -1181,7 +1181,7 @@ func (suite *TestSuite) TestGetBeanTypes() {
 	type SomeBean struct {
 		Scope Scope `di.scope:"prototype"`
 	}
-	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SomeBean)(nil)))
+	overwritten, err := RegisterBean("bean", reflect.TypeFor[*SomeBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	overwritten, err = RegisterBeanInstance("beanInstance", new(string))
@@ -1191,10 +1191,10 @@ func (suite *TestSuite) TestGetBeanTypes() {
 	assert.Len(suite.T(), beansTypes, 2)
 	assert.Contains(suite.T(), beansTypes, "bean")
 	bean := beansTypes["bean"]
-	assert.Equal(suite.T(), reflect.TypeOf((*SomeBean)(nil)), bean)
+	assert.Equal(suite.T(), reflect.TypeFor[*SomeBean](), bean)
 	assert.Contains(suite.T(), beansTypes, "beanInstance")
 	beanInstance := beansTypes["beanInstance"]
-	assert.Equal(suite.T(), reflect.TypeOf((*string)(nil)), beanInstance)
+	assert.Equal(suite.T(), reflect.TypeFor[*string](), beanInstance)
 	beansTypes["newBean"] = nil
 	assert.Len(suite.T(), GetBeanTypes(), 2)
 }
@@ -1203,13 +1203,13 @@ func (suite *TestSuite) TestGetBeanScopes() {
 	type SomeBean struct {
 		Scope Scope `di.scope:"prototype"`
 	}
-	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SomeBean)(nil)))
+	overwritten, err := RegisterBean("bean", reflect.TypeFor[*SomeBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	overwritten, err = RegisterBeanInstance("beanInstance", new(string))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBeanFactory("beanFactory", Request, func(context.Context) (interface{}, error) {
+	overwritten, err = RegisterBeanFactory("beanFactory", Request, func(context.Context) (any, error) {
 		return new(string), nil
 	})
 	assert.False(suite.T(), overwritten)
@@ -1251,7 +1251,7 @@ func (*SingletonBeanWithErrorOnClose) Close() error {
 }
 
 func (suite *TestSuite) TestShutdown() {
-	bean, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBeanWithClose)(nil)))
+	bean, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBeanWithClose]())
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), bean)
 	err = InitializeContainer()
@@ -1264,7 +1264,7 @@ func (suite *TestSuite) TestShutdown() {
 func (suite *TestSuite) TestShutdownNothingToClose() {
 	type SingletonBean struct {
 	}
-	bean, err := RegisterBean("singletonBean", reflect.TypeOf((*SingletonBean)(nil)))
+	bean, err := RegisterBean("singletonBean", reflect.TypeFor[*SingletonBean]())
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), bean)
 	err = InitializeContainer()
@@ -1273,7 +1273,7 @@ func (suite *TestSuite) TestShutdownNothingToClose() {
 }
 
 func (suite *TestSuite) TestShutdownErrorOnClose() {
-	_, _ = RegisterBean("singletonBeanWithErrorOnClose", reflect.TypeOf((*SingletonBeanWithErrorOnClose)(nil)))
+	_, _ = RegisterBean("singletonBeanWithErrorOnClose", reflect.TypeFor[*SingletonBeanWithErrorOnClose]())
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)
 	assert.Nil(suite.T(), singletonBeansWithErrorOnClose)
@@ -1284,9 +1284,9 @@ func (suite *TestSuite) TestShutdownErrorOnClose() {
 func (suite *TestSuite) TestShutdownContinueOnError() {
 	//cause of map usage internally in RegisterBean and order is unknown
 	for i := 1; i < 10; i++ {
-		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeOf((*SingletonBeanWithClose)(nil)))
+		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeFor[*SingletonBeanWithClose]())
 		i++
-		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeOf((*SingletonBeanWithErrorOnClose)(nil)))
+		_, _ = RegisterBean("a"+strconv.Itoa(i), reflect.TypeFor[*SingletonBeanWithErrorOnClose]())
 	}
 	err := InitializeContainer()
 	assert.NoError(suite.T(), err)

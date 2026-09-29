@@ -3,6 +3,7 @@ package di
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
 	"sort"
 	"strconv"
@@ -49,11 +50,11 @@ var activeLookups int
 var shutdownDone chan struct{}
 var lifecycleChanged = sync.NewCond(&initializeShutdownLock)
 var beans = make(map[string]reflect.Type)
-var beanFactories = make(map[string]func(context.Context) (interface{}, error))
+var beanFactories = make(map[string]func(context.Context) (any, error))
 var scopes = make(map[string]Scope)
-var singletonInstances = make(map[string]interface{})
+var singletonInstances = make(map[string]any)
 var userCreatedInstances = make(map[string]bool)
-var beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
+var beanPostprocessors = make(map[reflect.Type][]func(bean any) error)
 
 // InitializingBean provides a callback after field injection and context setup.
 type InitializingBean interface {
@@ -81,7 +82,7 @@ var logger = logrus.New()
 // Callbacks run in registration order after PostConstruct, including for supplied
 // instances and factory results. An error stops further callbacks and fails
 // initialization. Neither argument may be nil; registration must precede startup.
-func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean interface{}) error) error {
+func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean any) error) error {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
 	if containerState != uninitialized {
@@ -176,7 +177,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 		return false, errors.New("container is already initialized: can't register new bean")
 	}
 	overwritten = isBeanRegistered(beanID)
-	if beanType == nil || beanType.Kind() != reflect.Ptr {
+	if beanType == nil || beanType.Kind() != reflect.Pointer {
 		return false, errors.New("bean type must be a pointer")
 	}
 	if beanType.Elem().Kind() != reflect.Struct {
@@ -195,12 +196,12 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 		return false, err
 	}
 	beanTypeElement := beanType.Elem()
-	for i := 0; i < beanTypeElement.NumField(); i++ {
-		field := beanTypeElement.Field(i)
+	for field := range beanTypeElement.Fields() {
+		field := field
 		if _, ok := field.Tag.Lookup(string(inject)); !ok {
 			continue
 		}
-		if field.Type.Kind() != reflect.Ptr && field.Type.Kind() != reflect.Interface &&
+		if field.Type.Kind() != reflect.Pointer && field.Type.Kind() != reflect.Interface &&
 			field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Map {
 			return false, errors.New(unsupportedDependencyType)
 		}
@@ -221,7 +222,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 //
 // Registration must precede startup. A valid registration replaces any existing
 // bean with the same ID and returns overwritten=true. Invalid input leaves it intact.
-func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten bool, err error) {
+func RegisterBeanInstance(beanID string, beanInstance any) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
 	if containerState != uninitialized {
@@ -229,7 +230,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 	}
 	overwritten = isBeanRegistered(beanID)
 	beanType := reflect.TypeOf(beanInstance)
-	if beanType == nil || beanType.Kind() != reflect.Ptr || reflect.ValueOf(beanInstance).IsNil() {
+	if beanType == nil || beanType.Kind() != reflect.Pointer || reflect.ValueOf(beanInstance).IsNil() {
 		return false, errors.New("bean instance must be a pointer")
 	}
 	var existingBeanType reflect.Type
@@ -258,7 +259,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 // type matching because their result types are unknown until construction.
 // Registration must precede startup. A valid registration replaces any existing
 // bean with the same ID and returns overwritten=true. Invalid input leaves it intact.
-func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx context.Context) (interface{}, error)) (overwritten bool, err error) {
+func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx context.Context) (any, error)) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
 	if containerState != uninitialized {
@@ -298,8 +299,8 @@ func getScope(bean reflect.Type) (*Scope, error) {
 	var beanScope string
 	ok := false
 	beanElement := bean.Elem()
-	for i := 0; i < beanElement.NumField(); i++ {
-		field := beanElement.Field(i)
+	for field := range beanElement.Fields() {
+		field := field
 		beanScope, ok = field.Tag.Lookup(string(scope))
 		if ok {
 			break
@@ -324,7 +325,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 
 // injectDependencies fills tagged fields, including unexported ones, using the
 // current resolution's resolver so construction tracks dependency ownership.
-func (c *container) injectDependencies(beanID string, instance interface{}, resolve func(string) (interface{}, error)) error {
+func (c *container) injectDependencies(beanID string, instance any, resolve func(string) (any, error)) error {
 	logger.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceElement := c.beans[beanID].Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
@@ -340,7 +341,7 @@ func (c *container) injectDependencies(beanID string, instance interface{}, reso
 		target := reflect.ValueOf(instance).Elem().Field(i)
 		target = reflect.NewAt(target.Type(), unsafe.Pointer(target.UnsafeAddr())).Elem()
 		switch target.Kind() {
-		case reflect.Ptr, reflect.Interface:
+		case reflect.Pointer, reflect.Interface:
 			err = c.injectField(beanID, dependency, target, optionalDependency, resolve)
 		case reflect.Slice, reflect.Map:
 			err = c.injectCollection(beanID, target, optionalDependency, resolve)
@@ -354,7 +355,7 @@ func (c *container) injectDependencies(beanID string, instance interface{}, reso
 	return nil
 }
 
-func (c *container) injectField(beanID, dependency string, target reflect.Value, optionalDependency bool, resolve func(string) (interface{}, error)) error {
+func (c *container) injectField(beanID, dependency string, target reflect.Value, optionalDependency bool, resolve func(string) (any, error)) error {
 	if dependency == "" {
 		candidates := c.findInjectionCandidates(target.Type())
 		if len(candidates) == 0 {
@@ -379,9 +380,9 @@ func (c *container) injectField(beanID, dependency string, target reflect.Value,
 	return nil
 }
 
-func (c *container) injectCollection(beanID string, target reflect.Value, optionalDependency bool, resolve func(string) (interface{}, error)) error {
+func (c *container) injectCollection(beanID string, target reflect.Value, optionalDependency bool, resolve func(string) (any, error)) error {
 	elementType := target.Type().Elem()
-	if elementType.Kind() != reflect.Ptr && elementType.Kind() != reflect.Interface {
+	if elementType.Kind() != reflect.Pointer && elementType.Kind() != reflect.Interface {
 		return errors.New(unsupportedDependencyType)
 	}
 	candidates := c.findInjectionCandidates(elementType)
@@ -409,7 +410,7 @@ func (c *container) injectCollection(beanID string, target reflect.Value, option
 	return nil
 }
 
-func (c *container) dependencyValue(beanID, dependency string, optionalDependency bool, resolve func(string) (interface{}, error)) (reflect.Value, error) {
+func (c *container) dependencyValue(beanID, dependency string, optionalDependency bool, resolve func(string) (any, error)) (reflect.Value, error) {
 	beanScope, found := c.scopes[dependency]
 	if !found {
 		if optionalDependency {
@@ -459,18 +460,18 @@ func (c *container) findInjectionCandidates(fieldToInjectType reflect.Type) []st
 	return candidates
 }
 
-func validateFactoryInstance(beanInstance interface{}) error {
+func validateFactoryInstance(beanInstance any) error {
 	beanType := reflect.TypeOf(beanInstance)
-	if beanType == nil || beanType.Kind() == reflect.Ptr && reflect.ValueOf(beanInstance).IsNil() {
+	if beanType == nil || beanType.Kind() == reflect.Pointer && reflect.ValueOf(beanInstance).IsNil() {
 		return errors.New("bean factory must return a non-nil pointer")
 	}
-	if beanType.Kind() != reflect.Ptr {
+	if beanType.Kind() != reflect.Pointer {
 		return errors.New("bean factory must return pointer")
 	}
 	return nil
 }
 
-func (c *container) initializeInstance(ctx context.Context, beanID string, instance interface{}) error {
+func (c *container) initializeInstance(ctx context.Context, beanID string, instance any) error {
 	if impl, ok := instance.(ContextAwareBean); ok {
 		impl.SetContext(ctx)
 	}
@@ -490,7 +491,7 @@ func (c *container) initializeInstance(ctx context.Context, beanID string, insta
 
 // GetInstance returns a singleton or a new prototype by ID, panicking on lookup
 // errors. Use GetInstanceSafe to receive those errors as return values instead.
-func GetInstance(beanID string) interface{} {
+func GetInstance(beanID string) any {
 	beanInstance, err := GetInstanceSafe(beanID)
 	if err != nil {
 		panic(err)
@@ -506,7 +507,7 @@ func GetInstance(beanID string) interface{} {
 // Callbacks may use it during startup, including singleton self-lookups. Such
 // lookups may expose an in-progress singleton; wait for InitializeContainer to
 // succeed before using beans from application goroutines.
-func GetInstanceSafe(beanID string) (interface{}, error) {
+func GetInstanceSafe(beanID string) (any, error) {
 	c, release, err := acquireContainer()
 	if err != nil {
 		return nil, err
@@ -520,7 +521,7 @@ func GetInstanceSafe(beanID string) (interface{}, error) {
 
 // getRequestBeanInstance resolves with an explicit context and panics on errors.
 // The caller controls the parent context's lifetime and successful bean cleanup.
-func getRequestBeanInstance(ctx context.Context, beanID string) interface{} {
+func getRequestBeanInstance(ctx context.Context, beanID string) any {
 	c, release, err := acquireContainer()
 	if err != nil {
 		panic(err)
@@ -550,9 +551,7 @@ func GetBeanTypes() map[string]reflect.Type {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
 	beanTypes := make(map[string]reflect.Type)
-	for k, v := range beans {
-		beanTypes[k] = v
-	}
+	maps.Copy(beanTypes, beans)
 	return beanTypes
 }
 
@@ -562,9 +561,7 @@ func GetBeanScopes() map[string]Scope {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
 	beanScopes := make(map[string]Scope)
-	for k, v := range scopes {
-		beanScopes[k] = v
-	}
+	maps.Copy(beanScopes, scopes)
 	return beanScopes
 }
 
@@ -619,9 +616,9 @@ func resetContainerWithoutLock() {
 	containerState = uninitialized
 	runningContainer = nil
 	beans = make(map[string]reflect.Type)
-	beanFactories = make(map[string]func(context.Context) (interface{}, error))
+	beanFactories = make(map[string]func(context.Context) (any, error))
 	scopes = make(map[string]Scope)
-	singletonInstances = make(map[string]interface{})
+	singletonInstances = make(map[string]any)
 	userCreatedInstances = make(map[string]bool)
-	beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
+	beanPostprocessors = make(map[reflect.Type][]func(bean any) error)
 }

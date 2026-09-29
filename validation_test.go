@@ -14,7 +14,7 @@ func TestRegisterBeanRejectsNonStructPointers(t *testing.T) {
 	if _, err := RegisterBeanInstance("bean", original); err != nil {
 		t.Fatal(err)
 	}
-	for _, typ := range []reflect.Type{reflect.TypeOf((*string)(nil)), reflect.TypeOf((**int)(nil)), reflect.TypeOf((*[]string)(nil))} {
+	for _, typ := range []reflect.Type{reflect.TypeFor[*string](), reflect.TypeFor[**int](), reflect.TypeFor[*[]string]()} {
 		t.Run(typ.String(), func(t *testing.T) {
 			if overwritten, err := RegisterBean("bean", typ); overwritten || err == nil {
 				t.Fatalf("invalid registration returned (%v, %v)", overwritten, err)
@@ -31,10 +31,10 @@ func TestRegisterBeanRejectsNonStructPointers(t *testing.T) {
 
 func TestRegisterBeanPostprocessorRejectsNil(t *testing.T) {
 	defer resetContainer()
-	if err := RegisterBeanPostprocessor(nil, func(interface{}) error { return nil }); err == nil {
+	if err := RegisterBeanPostprocessor(nil, func(any) error { return nil }); err == nil {
 		t.Fatal("nil postprocessor type accepted")
 	}
-	if err := RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), nil); err == nil {
+	if err := RegisterBeanPostprocessor(reflect.TypeFor[*string](), nil); err == nil {
 		t.Fatal("nil postprocessor accepted")
 	}
 	if _, err := RegisterBeanInstance("bean", new(string)); err != nil {
@@ -46,7 +46,7 @@ func TestRegisterBeanPostprocessorRejectsNil(t *testing.T) {
 }
 
 func TestInjectionRejectsUnsupportedFieldTypes(t *testing.T) {
-	for _, bean := range []interface{}{
+	for _, bean := range []any{
 		&struct {
 			Value string `di.inject:""`
 		}{},
@@ -70,11 +70,11 @@ func TestInjectionRejectsUnsupportedFieldTypes(t *testing.T) {
 
 func TestCollectionInjectionRejectsRequestDependencies(t *testing.T) {
 	defer resetContainer()
-	_, err := RegisterBean("request", reflect.TypeOf((*requestBean)(nil)))
+	_, err := RegisterBean("request", reflect.TypeFor[*requestBean]())
 	require.NoError(t, err)
-	_, err = RegisterBean("consumer", reflect.TypeOf(&struct {
-		Requests []*requestBean `di.inject:""`
-	}{}))
+	_, err = RegisterBean("consumer", reflect.TypeFor[*struct {
+		Requests []*requestBean "di.inject:\"\""
+	}]())
 	require.NoError(t, err)
 	require.EqualError(t, InitializeContainer(), requestScopedBeansCantBeInjected)
 }
@@ -82,7 +82,7 @@ func TestCollectionInjectionRejectsRequestDependencies(t *testing.T) {
 func TestInstanceRegistrationReplacesFactory(t *testing.T) {
 	defer resetContainer()
 	factoryCalled := false
-	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		factoryCalled = true
 		return new(string), nil
 	})
@@ -98,7 +98,7 @@ func TestInstanceRegistrationReplacesFactory(t *testing.T) {
 
 func TestRequestLookupBeforeInitializationFails(t *testing.T) {
 	defer resetContainer()
-	_, err := RegisterBean("request", reflect.TypeOf((*requestBean)(nil)))
+	_, err := RegisterBean("request", reflect.TypeFor[*requestBean]())
 	require.NoError(t, err)
 	require.PanicsWithError(t, "container is not initialized: can't lookup instances of beans yet", func() {
 		getRequestBeanInstance(context.Background(), "request")
