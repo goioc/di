@@ -7,7 +7,6 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/goioc/di)](https://goreportcard.com/report/github.com/goioc/di)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=goioc_di&metric=alert_status)](https://sonarcloud.io/dashboard?id=goioc_di)
 [![codecov](https://codecov.io/gh/goioc/di/branch/master/graph/badge.svg)](https://codecov.io/gh/goioc/di)
-[![DeepSource](https://static.deepsource.io/deepsource-badge-light-mini.svg)](https://deepsource.io/gh/goioc/di/?ref=repository-badge)
 [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome)
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/G2G5JUKU7)
