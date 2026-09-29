@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -103,7 +103,7 @@ func (c *container) ids(scope Scope) []string {
 			ids = append(ids, id)
 		}
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids
 }
 
@@ -411,8 +411,7 @@ func (c *container) closeNodes(nodes []*beanNode, includeSingletons, includeProv
 
 func (c *container) closeOrderedNodes(ordered []*beanNode, includeSingletons, includeProvided bool) {
 	closed := make(map[any]bool)
-	for i := len(ordered) - 1; i >= 0; i-- {
-		n := ordered[i]
+	for _, n := range slices.Backward(ordered) {
 		if value := c.claimCleanup(n, includeSingletons, includeProvided, closed); value != nil {
 			closeBean(n.id, value)
 		}

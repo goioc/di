@@ -5,7 +5,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -197,7 +197,6 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 	}
 	beanTypeElement := beanType.Elem()
 	for field := range beanTypeElement.Fields() {
-		field := field
 		if _, ok := field.Tag.Lookup(string(inject)); !ok {
 			continue
 		}
@@ -296,31 +295,20 @@ func clearBeanRegistration(beanID string) {
 }
 
 func getScope(bean reflect.Type) (*Scope, error) {
-	var beanScope string
-	ok := false
-	beanElement := bean.Elem()
-	for field := range beanElement.Fields() {
-		field := field
-		beanScope, ok = field.Tag.Lookup(string(scope))
-		if ok {
-			break
+	for field := range bean.Elem().Fields() {
+		if scopeTag, ok := field.Tag.Lookup(string(scope)); ok {
+			switch Scope(scopeTag) {
+			case Singleton:
+				return new(Singleton), nil
+			case Prototype:
+				return new(Prototype), nil
+			case Request:
+				return new(Request), nil
+			}
+			return nil, errors.New("unsupported scope: " + scopeTag)
 		}
 	}
-	singleton := Singleton
-	prototype := Prototype
-	request := Request
-	if !ok {
-		return &singleton, nil
-	}
-	switch beanScope {
-	case string(Singleton):
-		return &singleton, nil
-	case string(Prototype):
-		return &prototype, nil
-	case string(Request):
-		return &request, nil
-	}
-	return nil, errors.New("unsupported scope: " + beanScope)
+	return new(Singleton), nil
 }
 
 // injectDependencies fills tagged fields, including unexported ones, using the
@@ -328,7 +316,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 func (c *container) injectDependencies(beanID string, instance any, resolve func(string) (any, error)) error {
 	logger.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceElement := c.beans[beanID].Elem()
-	for i := 0; i < instanceElement.NumField(); i++ {
+	for i := range instanceElement.NumField() {
 		field := instanceElement.Field(i)
 		dependency, ok := field.Tag.Lookup(string(inject))
 		if !ok {
@@ -456,7 +444,7 @@ func (c *container) findInjectionCandidates(fieldToInjectType reflect.Type) []st
 			candidates = append(candidates, beanID)
 		}
 	}
-	sort.Strings(candidates)
+	slices.Sort(candidates)
 	return candidates
 }
 
