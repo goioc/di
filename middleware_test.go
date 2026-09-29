@@ -19,11 +19,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-var closed bool
+var closed = make(chan struct{})
 
 type singletonBean struct {
 }
@@ -38,7 +39,7 @@ func (rb *requestBean) SetContext(ctx context.Context) {
 }
 
 func (*requestBean) Close() error {
-	closed = true
+	close(closed)
 	return nil
 }
 
@@ -62,9 +63,16 @@ func (suite *TestSuite) TestMiddleware() {
 	}))
 	server := httptest.NewServer(middleware)
 	defer server.Close()
-	_, err = http.Get(server.URL)
+	resp, err := http.Get(server.URL)
 	assert.NoError(suite.T(), err)
-	assert.True(suite.T(), closed)
+	if assert.NotNil(suite.T(), resp) {
+		assert.NoError(suite.T(), resp.Body.Close())
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		assert.Fail(suite.T(), "request bean was not closed")
+	}
 }
 
 func (suite *TestSuite) TestMiddlewareNotInitialized() {

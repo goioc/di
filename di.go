@@ -57,7 +57,6 @@ const (
 )
 
 var initializeShutdownLock sync.Mutex
-var createInstanceLock sync.Mutex
 var containerInitialized int32
 var beans = make(map[string]reflect.Type)
 var beanFactories = make(map[string]func(context.Context) (interface{}, error))
@@ -113,6 +112,7 @@ func InitializeContainer() error {
 	atomic.StoreInt32(&containerInitialized, 1)
 	err = initializeSingletonInstances()
 	if err != nil {
+		atomic.StoreInt32(&containerInitialized, 0)
 		return err
 	}
 	return nil
@@ -128,12 +128,12 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return false, errors.New("container is already initialized: can't register new bean")
 	}
-	if beanType.Kind() != reflect.Ptr {
+	overwritten = isBeanRegistered(beanID)
+	if beanType == nil || beanType.Kind() != reflect.Ptr {
 		return false, errors.New("bean type must be a pointer")
 	}
 	var existingBeanType reflect.Type
-	var ok bool
-	if existingBeanType, ok = beans[beanID]; ok {
+	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
 		logrus.WithFields(logrus.Fields{
 			"id":              beanID,
 			"registered bean": existingBeanType,
@@ -154,10 +154,14 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 			field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Map {
 			return false, errors.New(unsupportedDependencyType)
 		}
+		if field.Type.Kind() == reflect.Map && field.Type.Key().Kind() != reflect.String {
+			return false, errors.New(unsupportedDependencyType)
+		}
 	}
+	clearBeanRegistration(beanID)
 	beans[beanID] = beanType
 	scopes[beanID] = *beanScope
-	return ok, nil
+	return overwritten, nil
 }
 
 // RegisterBeanInstance function registers bean, provided the pre-created instance of this bean, the scope of such beans
@@ -169,24 +173,25 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return false, errors.New("container is already initialized: can't register new bean")
 	}
+	overwritten = isBeanRegistered(beanID)
 	beanType := reflect.TypeOf(beanInstance)
-	if beanType.Kind() != reflect.Ptr {
+	if beanType == nil || beanType.Kind() != reflect.Ptr || reflect.ValueOf(beanInstance).IsNil() {
 		return false, errors.New("bean instance must be a pointer")
 	}
 	var existingBeanType reflect.Type
-	var ok bool
-	if existingBeanType, ok = beans[beanID]; ok {
+	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
 		logrus.WithFields(logrus.Fields{
 			"id":                beanID,
 			"registered bean":   existingBeanType,
 			"new bean instance": beanType,
 		}).Warn(beanAlreadyRegistered)
 	}
+	clearBeanRegistration(beanID)
 	beans[beanID] = beanType
 	scopes[beanID] = Singleton
 	singletonInstances[beanID] = beanInstance
 	userCreatedInstances[beanID] = true
-	return ok, nil
+	return overwritten, nil
 }
 
 // RegisterBeanFactory function registers bean, provided the bean factory that will be used by the container in order to
@@ -199,17 +204,32 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx co
 	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
 		return false, errors.New("container is already initialized: can't register new bean factory")
 	}
+	if beanScope != Singleton && beanScope != Prototype && beanScope != Request {
+		return false, errors.New("unsupported scope: " + string(beanScope))
+	}
+	if beanFactory == nil {
+		return false, errors.New("bean factory must not be nil")
+	}
+	overwritten = isBeanRegistered(beanID)
 	var existingBeanType reflect.Type
-	var ok bool
-	if existingBeanType, ok = beans[beanID]; ok {
+	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
 		logrus.WithFields(logrus.Fields{
 			"id":              beanID,
 			"registered bean": existingBeanType,
 		}).Warn(beanAlreadyRegistered)
 	}
+	clearBeanRegistration(beanID)
 	scopes[beanID] = beanScope
 	beanFactories[beanID] = beanFactory
-	return ok, nil
+	return overwritten, nil
+}
+
+func clearBeanRegistration(beanID string) {
+	delete(beans, beanID)
+	delete(beanFactories, beanID)
+	delete(scopes, beanID)
+	delete(singletonInstances, beanID)
+	delete(userCreatedInstances, beanID)
 }
 
 func getScope(bean reflect.Type) (*Scope, error) {
@@ -259,6 +279,9 @@ func injectSingletonDependencies() error {
 func injectDependencies(beanID string, instance interface{}, chain map[string]bool) error {
 	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceType := beans[beanID]
+	if instanceType == nil {
+		instanceType = reflect.TypeOf(instance)
+	}
 	instanceElement := instanceType.Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
@@ -304,7 +327,11 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			if err != nil {
 				return err
 			}
-			fieldToInject.Set(reflect.ValueOf(instanceToInject))
+			valueToInject := reflect.ValueOf(instanceToInject)
+			if !valueToInject.Type().AssignableTo(fieldToInject.Type()) {
+				return errors.New("bean is not assignable to dependency field")
+			}
+			fieldToInject.Set(valueToInject)
 		case reflect.Slice:
 			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
 				return errors.New(unsupportedDependencyType)
@@ -327,7 +354,11 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if err != nil {
 					return err
 				}
-				fieldToInject.Index(i).Set(reflect.ValueOf(instanceToInject))
+				valueToInject := reflect.ValueOf(instanceToInject)
+				if !valueToInject.Type().AssignableTo(fieldToInject.Type().Elem()) {
+					return errors.New("bean is not assignable to dependency field")
+				}
+				fieldToInject.Index(i).Set(valueToInject)
 			}
 		case reflect.Map:
 			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
@@ -351,7 +382,11 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				if err != nil {
 					return err
 				}
-				fieldToInject.SetMapIndex(reflect.ValueOf(beanToInject), reflect.ValueOf(instanceToInject))
+				valueToInject := reflect.ValueOf(instanceToInject)
+				if !valueToInject.Type().AssignableTo(fieldToInject.Type().Elem()) {
+					return errors.New("bean is not assignable to dependency field")
+				}
+				fieldToInject.SetMapIndex(reflect.ValueOf(beanToInject).Convert(fieldToInject.Type().Key()), valueToInject)
 			}
 		default:
 			return errors.New(unsupportedDependencyType)
@@ -414,8 +449,8 @@ func createSingletonInstances() error {
 		if err != nil {
 			return err
 		}
-		if reflect.TypeOf(beanInstance).Kind() != reflect.Ptr {
-			return errors.New("bean factory must return pointer")
+		if err := validateFactoryInstance(beanInstance); err != nil {
+			return err
 		}
 		singletonInstances[beanID] = beanInstance
 		logrus.WithFields(logrus.Fields{
@@ -427,20 +462,29 @@ func createSingletonInstances() error {
 }
 
 func createInstance(ctx context.Context, beanID string) (interface{}, error) {
-	createInstanceLock.Lock()
-	defer createInstanceLock.Unlock()
 	if beanFactory, ok := beanFactories[beanID]; ok {
 		beanInstance, err := beanFactory(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if reflect.TypeOf(beanInstance).Kind() != reflect.Ptr {
-			return nil, errors.New("bean factory must return pointer")
+		if err := validateFactoryInstance(beanInstance); err != nil {
+			return nil, err
 		}
 		return beanInstance, nil
 	}
 	logrus.WithField("beanID", beanID).Trace("creating instance")
 	return reflect.New(beans[beanID].Elem()).Interface(), nil
+}
+
+func validateFactoryInstance(beanInstance interface{}) error {
+	beanType := reflect.TypeOf(beanInstance)
+	if beanType == nil || beanType.Kind() == reflect.Ptr && reflect.ValueOf(beanInstance).IsNil() {
+		return errors.New("bean factory must return a non-nil pointer")
+	}
+	if beanType.Kind() != reflect.Ptr {
+		return errors.New("bean factory must return pointer")
+	}
+	return nil
 }
 
 func initializeSingletonInstances() error {
@@ -544,6 +588,7 @@ func getInstance(ctx context.Context, beanID string, chain map[string]bool) (int
 		return nil, errors.New("circular dependency detected for bean: " + beanID)
 	}
 	chain[beanID] = true
+	defer delete(chain, beanID)
 	instance, err := createInstance(ctx, beanID)
 	if err != nil {
 		return nil, err
