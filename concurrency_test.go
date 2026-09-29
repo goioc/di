@@ -206,3 +206,119 @@ func TestRequestCloseErrorDoesNotPanic(t *testing.T) {
 		t.Fatal("request was not cleaned up")
 	}
 }
+
+func TestLookupRejectsSingletonUnderConstruction(t *testing.T) {
+	defer resetContainer()
+	started, releaseFactory := make(chan struct{}), make(chan struct{})
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+		close(started)
+		<-releaseFactory
+		return new(string), nil
+	})
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() { done <- InitializeContainer() }()
+	<-started
+	instance, lookupErr := GetInstanceSafe("bean")
+	close(releaseFactory)
+	require.NoError(t, <-done)
+	require.Nil(t, instance)
+	require.EqualError(t, lookupErr, "bean construction is already in progress: bean")
+	_, err = GetInstanceSafe("bean")
+	require.NoError(t, err)
+}
+
+func TestCloseWaitsForInitialization(t *testing.T) {
+	defer resetContainer()
+	started, releaseHook := make(chan struct{}), make(chan struct{})
+	closed := make(chan struct{})
+	_, err := RegisterBeanInstance("bean", &callbackBean{
+		initHook:  func() error { close(started); <-releaseHook; return nil },
+		closeHook: func() error { close(closed); return nil },
+	})
+	require.NoError(t, err)
+	initializationDone := make(chan error, 1)
+	go func() { initializationDone <- InitializeContainer() }()
+	<-started
+	shutdownDone := make(chan struct{})
+	go func() { Close(); close(shutdownDone) }()
+	select {
+	case <-shutdownDone:
+		t.Error("shutdown returned before initialization finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case <-closed:
+		t.Error("singleton closed while its initialization hook was running")
+	default:
+	}
+	close(releaseHook)
+	require.NoError(t, <-initializationDone)
+	select {
+	case <-shutdownDone:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not resume after initialization")
+	}
+	select {
+	case <-closed:
+	default:
+		t.Fatal("singleton was not closed")
+	}
+}
+
+func TestRollbackWaitsForActiveLookup(t *testing.T) {
+	defer resetContainer()
+	started, releaseFactory := make(chan struct{}), make(chan struct{})
+	lookupDone := make(chan error, 1)
+	closed := 0
+	_, err := RegisterBeanFactory("prototype", Prototype, func(context.Context) (interface{}, error) {
+		close(started)
+		<-releaseFactory
+		return &callbackBean{closeHook: func() error { closed++; return nil }}, nil
+	})
+	require.NoError(t, err)
+	failure := errors.New("startup failed during lookup")
+	_, err = RegisterBeanFactory("singleton", Singleton, func(context.Context) (interface{}, error) {
+		return &callbackBean{
+			initHook: func() error {
+				go func() { _, err := GetInstanceSafe("prototype"); lookupDone <- err }()
+				<-started
+				return failure
+			},
+			closeHook: func() error { closed++; return nil },
+		}, nil
+	})
+	require.NoError(t, err)
+	done := make(chan struct{})
+	var initializationErr error
+	go func() { initializationErr = InitializeContainer(); close(done) }()
+	// Wait until rollback rejects new lookups while the admitted factory is blocked.
+	rollingBackStarted := false
+	deadline := time.After(time.Second)
+	for !rollingBackStarted {
+		select {
+		case <-deadline:
+			close(releaseFactory)
+			<-lookupDone
+			<-done
+			t.Fatal("rollback did not start")
+		default:
+			initializeShutdownLock.Lock()
+			rollingBackStarted = containerState == rollingBack
+			initializeShutdownLock.Unlock()
+			time.Sleep(time.Millisecond)
+		}
+	}
+	_, err = GetInstanceSafe("singleton")
+	require.Error(t, err)
+	select {
+	case <-done:
+		t.Error("rollback returned while a lookup was active")
+	default:
+	}
+	close(releaseFactory)
+	require.NoError(t, <-lookupDone)
+	<-done
+	require.ErrorIs(t, initializationErr, failure)
+	require.Equal(t, 2, closed, "rollback must clean up both the singleton and the completed startup lookup")
+}

@@ -275,3 +275,71 @@ func TestInitializationPanicRollsBackAndCanRetry(t *testing.T) {
 	Close()
 	require.Equal(t, 2, closed)
 }
+
+func TestFailedResolutionPreservesFactorySingletonAlias(t *testing.T) {
+	defer resetContainer()
+	closed, initialized := 0, 0
+	failure := errors.New("alias initialization failed")
+	shared := &callbackBean{
+		initHook: func() error {
+			initialized++
+			if initialized > 1 {
+				return failure
+			}
+			return nil
+		},
+		closeHook: func() error { closed++; return nil },
+	}
+	for _, registration := range []struct {
+		id    string
+		scope Scope
+	}{{"singleton", Singleton}, {"alias", Prototype}} {
+		_, err := RegisterBeanFactory(registration.id, registration.scope, func(context.Context) (interface{}, error) { return shared, nil })
+		require.NoError(t, err)
+	}
+	require.NoError(t, InitializeContainer())
+	_, err := GetInstanceSafe("alias")
+	require.ErrorIs(t, err, failure)
+	require.Zero(t, closed)
+	require.Same(t, shared, GetInstance("singleton"))
+	Close()
+	require.Equal(t, 1, closed)
+}
+
+func TestShutdownClosesSharedFactoryInstanceOnce(t *testing.T) {
+	defer resetContainer()
+	closed := 0
+	shared := &callbackBean{closeHook: func() error { closed++; return nil }}
+	for _, id := range []string{"a", "b"} {
+		_, err := RegisterBeanFactory(id, Singleton, func(context.Context) (interface{}, error) { return shared, nil })
+		require.NoError(t, err)
+	}
+	require.NoError(t, InitializeContainer())
+	Close()
+	require.Equal(t, 1, closed)
+}
+
+func TestFailedSingletonLookupKeepsOriginalError(t *testing.T) {
+	defer resetContainer()
+	failure := errors.New("dependency initialization failed")
+	initialized, closed := 0, 0
+	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (interface{}, error) {
+		return &callbackBean{
+			initHook:  func() error { initialized++; return failure },
+			closeHook: func() error { closed++; return nil },
+		}, nil
+	})
+	require.NoError(t, err)
+	_, err = RegisterBeanFactory("consumer", Singleton, func(context.Context) (interface{}, error) {
+		for i := 0; i < 2; i++ {
+			instance, err := GetInstanceSafe("dependency")
+			require.Nil(t, instance)
+			require.ErrorIs(t, err, failure)
+		}
+		return nil, failure
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, InitializeContainer(), failure)
+	require.Equal(t, 1, initialized)
+	require.Equal(t, 1, closed)
+}
