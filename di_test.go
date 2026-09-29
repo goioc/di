@@ -784,10 +784,10 @@ func (suite *TestSuite) TestSharedPrototypeDependencyIsNotCircular() {
 }
 
 func (suite *TestSuite) TestFactoryCanLookupPrototypeBean() {
-	type Prototype struct {
+	type PrototypeBean struct {
 		Scope Scope `di.scope:"prototype"`
 	}
-	_, err := RegisterBean("prototype", reflect.TypeOf((*Prototype)(nil)))
+	_, err := RegisterBean("prototype", reflect.TypeOf((*PrototypeBean)(nil)))
 	assert.NoError(suite.T(), err)
 	_, err = RegisterBeanFactory("factory", Prototype, func(context.Context) (interface{}, error) {
 		if _, err := GetInstanceSafe("prototype"); err != nil {
