@@ -121,11 +121,11 @@ func registerMessage() error {
 ```
 
 Import `context` for this snippet. Factories can use `di.GetInstanceSafe` to look
-up other beans. Request beans and the beans they inject receive a context
-derived from the HTTP request, canceled when the request ends; standalone
-singleton and prototype resolutions receive `context.Background()`. If a factory fails, it
-must release resources it created but did not return successfully, including any value
-returned alongside a non-nil error.
+up other beans. Request beans and their prototype dependencies receive a context
+derived from the HTTP request, canceled when the request ends. Singleton
+dependencies and standalone prototype resolutions receive `context.Background()`.
+If a factory fails, it must release resources it created but did not return
+successfully, including any value returned alongside a non-nil error.
 
 ## Field injection
 
