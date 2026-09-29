@@ -851,7 +851,7 @@ func (suite *TestSuite) TestInjectByTypeMoreThanOneCandidate() {
 	overwritten, err = RegisterBeanInstance("candidate2", &OtherBean{})
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	expectedError := errors.New("more then one candidate found for the injection")
+	expectedError := errors.New("more than one candidate found for the injection")
 	err = InitializeContainer()
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
