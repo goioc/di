@@ -1,17 +1,3 @@
-/*
- * Copyright (c) 2024 Go IoC
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- */
-
 package di
 
 import (
@@ -26,18 +12,19 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Scope is an enum for bean scopes supported in this IoC container.
+// Scope determines when a bean is created and who manages its lifetime.
 type Scope string
 
 const (
-	// Singleton is a scope of bean that exists only in one copy in the container and is created at the init-time.
-	// If the bean is singleton and implements Close() method, then this method will be called on Close (consumer responsibility to call Close)
+	// Singleton reuses one instance per registration after InitializeContainer.
+	// Close releases singleton instances that implement io.Closer.
 	Singleton Scope = "singleton"
-	// Prototype is a scope of bean that can exist in multiple copies in the container and is created on demand.
+	// Prototype creates an instance for each lookup or injection. After successful
+	// initialization, the caller or consuming bean is responsible for its cleanup.
 	Prototype Scope = "prototype"
-	// Request is a scope of bean whose lifecycle is bound to the web request (or more precisely - to the corresponding
-	// context). If the bean implements Close() method, then this method will be called upon corresponding context's
-	// cancellation.
+	// Request creates an instance for each HTTP request handled by Middleware.
+	// Middleware starts cleanup on cancellation or handler return. Request beans
+	// cannot be field-injected or retrieved with GetInstance or GetInstanceSafe.
 	Request Scope = "request"
 )
 
@@ -68,16 +55,20 @@ var singletonInstances = make(map[string]interface{})
 var userCreatedInstances = make(map[string]bool)
 var beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
 
-// InitializingBean marks beans that need initialization after dependency injection.
+// InitializingBean provides a callback after field injection and context setup.
 type InitializingBean interface {
-	// PostConstruct is called after SetContext and dependency initialization.
+	// PostConstruct runs before registered postprocessors. Returning an error
+	// fails the lookup or container startup. Hooks in a singleton field cycle
+	// must not assume the other cycle members have finished initialization.
 	PostConstruct() error
 }
 
-// ContextAwareBean is an interface marking beans that can accept context. Mostly meant to be used with Request-scoped
-// beans (HTTP request context will be propagated for them). For all other beans it's gonna be `context.Background()`.
+// ContextAwareBean receives a context before PostConstruct and postprocessors.
+// Request beans receive a context derived from the HTTP request; other scopes
+// receive context.Background. Failed request initialization cancels its context
+// before cleanup, and successful request contexts end when their parent is canceled.
 type ContextAwareBean interface {
-	// SetContext method will be called on a bean after its creation.
+	// SetContext supplies the bean's context before its initialization callbacks.
 	SetContext(ctx context.Context)
 }
 
@@ -85,8 +76,10 @@ func init() {
 	logrus.SetFormatter(&logrus.TextFormatter{})
 }
 
-// RegisterBeanPostprocessor function registers postprocessors for beans. Postprocessor is a function that can perform
-// some actions on beans after their creation by the container (and self-initialization with PostConstruct).
+// RegisterBeanPostprocessor appends a callback for an exact runtime bean type.
+// Callbacks run in registration order after PostConstruct, including for supplied
+// instances and factory results. An error stops further callbacks and fails
+// initialization. Neither argument may be nil; registration must precede startup.
 func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean interface{}) error) error {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
@@ -103,9 +96,14 @@ func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean in
 	return nil
 }
 
-// InitializeContainer creates and initializes the registered singletons. Registration is
-// frozen until Close. Factories and hooks may look up other beans during startup;
-// applications must wait for InitializeContainer to return before serving requests.
+// InitializeContainer creates, wires, and initializes registered singletons.
+// It waits for admitted lookups and verifies singleton initialization results
+// before succeeding. Registration is frozen during startup and until Close.
+//
+// On failure, newly created resources are closed and registrations are retained
+// for retry. Supplied instances are retained, so their callbacks may run again.
+// Callback panics propagate after rollback. Factories and hooks may look up beans
+// during startup; application work must wait for successful initialization.
 func InitializeContainer() (err error) {
 	initializeShutdownLock.Lock()
 	if containerState != uninitialized {
@@ -162,10 +160,14 @@ func InitializeContainer() (err error) {
 	return nil
 }
 
-// RegisterBean function registers bean by type, the scope of the bean should be defined in the corresponding struct
-// using a tag `di.scope` (`Singleton` is used if no scope is explicitly specified). `beanType` must be a pointer to a struct
-// type, e.g.: `reflect.TypeOf((*services.YourService)(nil))`. Return value of `overwritten` is set to `true` if the
-// bean with the same `beanID` has been registered already.
+// RegisterBean registers a pointer-to-struct type for allocation and field injection.
+// A di.scope tag selects its scope; without one it is Singleton. For example,
+// reflect.TypeOf((*Service)(nil)) registers *Service. Fields tagged di.inject
+// accept pointers, interfaces, slices, or maps with string keys.
+//
+// Registration must precede startup. A valid registration replaces any existing
+// bean with the same ID and returns overwritten=true. Invalid input leaves the
+// previous registration intact.
 func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
@@ -211,9 +213,13 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 	return overwritten, nil
 }
 
-// RegisterBeanInstance function registers bean, provided the pre-created instance of this bean, the scope of such beans
-// are always `Singleton`. `beanInstance` can only be a reference or an interface. Return value of `overwritten` is set
-// to `true` if the bean with the same `beanID` has been registered already.
+// RegisterBeanInstance registers an existing non-nil pointer as a Singleton.
+// Its fields are not injected, but context setup, PostConstruct, and registered
+// postprocessors still run during startup. Startup failure retains the instance;
+// Close releases it if it implements io.Closer, even before initialization.
+//
+// Registration must precede startup. A valid registration replaces any existing
+// bean with the same ID and returns overwritten=true. Invalid input leaves it intact.
 func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
@@ -241,10 +247,16 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 	return overwritten, nil
 }
 
-// RegisterBeanFactory function registers bean, provided the bean factory that will be used by the container in order to
-// create an instance of this bean. `beanScope` can be any scope of the supported ones. `beanFactory` can only produce a
-// reference or an interface. Return value of `overwritten` is set to `true` if the bean with the same `beanID` has been
-// registered already.
+// RegisterBeanFactory registers a non-nil factory with Singleton, Prototype, or
+// Request scope. The factory must return a non-nil pointer on success. Its result
+// receives lifecycle callbacks but no field injection. Request factories receive
+// a context derived from the HTTP request; other scopes receive context.Background.
+// The factory must clean up resources it creates but does not return successfully.
+//
+// Factory registrations can be injected by ID, but are excluded from automatic
+// type matching because their result types are unknown until construction.
+// Registration must precede startup. A valid registration replaces any existing
+// bean with the same ID and returns overwritten=true. Invalid input leaves it intact.
 func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx context.Context) (interface{}, error)) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
@@ -271,6 +283,8 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx co
 	return overwritten, nil
 }
 
+// clearBeanRegistration removes all registration forms before replacing an ID.
+// The caller must hold initializeShutdownLock.
 func clearBeanRegistration(beanID string) {
 	delete(beans, beanID)
 	delete(beanFactories, beanID)
@@ -307,6 +321,8 @@ func getScope(bean reflect.Type) (*Scope, error) {
 	return nil, errors.New("unsupported scope: " + beanScope)
 }
 
+// injectDependencies fills tagged fields, including unexported ones, using the
+// current resolution's resolver so construction tracks dependency ownership.
 func (c *container) injectDependencies(beanID string, instance interface{}, resolve func(string) (interface{}, error)) error {
 	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
 	instanceElement := c.beans[beanID].Elem()
@@ -429,6 +445,8 @@ func isOptional(field reflect.StructField) (bool, error) {
 	return value, nil
 }
 
+// findInjectionCandidates matches assignable registered types in bean-ID order.
+// Factories are absent from c.beans because their result types are not declared.
 func (c *container) findInjectionCandidates(fieldToInjectType reflect.Type) []string {
 	var candidates []string
 	for beanID, beanType := range c.beans {
@@ -469,8 +487,8 @@ func (c *container) initializeInstance(ctx context.Context, beanID string, insta
 	return nil
 }
 
-// GetInstance function returns bean instance by its ID. It may panic, so if receiving the error in return is preferred,
-// consider using `GetInstanceSafe`.
+// GetInstance returns a singleton or a new prototype by ID, panicking on lookup
+// errors. Use GetInstanceSafe to receive those errors as return values instead.
 func GetInstance(beanID string) interface{} {
 	beanInstance, err := GetInstanceSafe(beanID)
 	if err != nil {
@@ -479,8 +497,14 @@ func GetInstance(beanID string) interface{} {
 	return beanInstance
 }
 
-// GetInstanceSafe function returns bean instance by its ID. It doesnt panic upon explicit error, but returns the error
-// instead.
+// GetInstanceSafe returns a singleton or creates and initializes a prototype by ID.
+// It returns errors for missing beans, request-scoped beans, failed construction
+// or initialization, and lookups outside startup or an initialized container.
+// It does not recover panics from factories or lifecycle callbacks.
+//
+// Callbacks may use it during startup, including singleton self-lookups. Such
+// lookups may expose an in-progress singleton; wait for InitializeContainer to
+// succeed before using beans from application goroutines.
 func GetInstanceSafe(beanID string) (interface{}, error) {
 	c, release, err := acquireContainer()
 	if err != nil {
@@ -493,6 +517,8 @@ func GetInstanceSafe(beanID string) (interface{}, error) {
 	return c.resolve(context.Background(), beanID)
 }
 
+// getRequestBeanInstance resolves with an explicit context and panics on errors.
+// The caller controls the parent context's lifetime and successful bean cleanup.
 func getRequestBeanInstance(ctx context.Context, beanID string) interface{} {
 	c, release, err := acquireContainer()
 	if err != nil {
@@ -516,8 +542,9 @@ func isBeanRegistered(beanID string) bool {
 	return false
 }
 
-// GetBeanTypes returns a map (copy) of beans registered in the Container, omitting bean factories, because their real
-// return type is unknown.
+// GetBeanTypes returns a copy of types registered by RegisterBean or
+// RegisterBeanInstance. Factory registrations are omitted. It is safe to call
+// from lifecycle callbacks, including during startup, rollback, and shutdown.
 func GetBeanTypes() map[string]reflect.Type {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
@@ -528,7 +555,8 @@ func GetBeanTypes() map[string]reflect.Type {
 	return beanTypes
 }
 
-// GetBeanScopes returns a map (copy) of bean scopes registered in the Container.
+// GetBeanScopes returns a copy of all registered scopes, including factories.
+// It is safe to call from lifecycle callbacks during startup, rollback, and shutdown.
 func GetBeanScopes() map[string]Scope {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
@@ -542,6 +570,9 @@ func GetBeanScopes() map[string]Scope {
 // Close stops new lookups, waits for active lookups, and closes singletons in
 // reverse initialization order. Close errors are logged and cleanup continues.
 // Concurrent callers wait for the same shutdown and container reset to finish.
+// It also waits for startup or rollback in progress. All registrations and
+// postprocessors are cleared, allowing a fresh registration and startup cycle.
+// Supplied instances can be closed even if InitializeContainer was never called.
 // Stop application work before calling Close: returned beans can outlive a lookup.
 // Do not call Close from a factory, initialization callback, or bean closer, or
 // wait for Close inside one: shutdown must wait for that callback to finish.

@@ -1,17 +1,3 @@
-/*
- * Copyright (c) 2024 Go IoC
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- */
-
 package di
 
 import (
@@ -35,6 +21,8 @@ const (
 	closing
 )
 
+// acquireContainer admits a lookup into the current lifecycle. The caller must
+// release it exactly once, after callbacks and any failed-resolution cleanup.
 func acquireContainer() (*container, func(), error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
@@ -62,15 +50,16 @@ const (
 )
 
 type beanNode struct {
-	id           string
-	scope        Scope
-	instance     interface{}
-	ctx          context.Context
-	dependencies []*beanNode
-	provided     bool
-	state        beanState
-	err          error
-	closed       bool
+	id                 string
+	scope              Scope
+	instance           interface{}
+	ctx                context.Context
+	dependencies       []*beanNode
+	provided           bool
+	state              beanState
+	err                error
+	closed             bool
+	initializationDone chan struct{}
 }
 
 // Registration maps are frozen for the lifetime of this container. Only node
@@ -89,7 +78,7 @@ type container struct {
 	provided       map[interface{}]bool
 }
 
-// Called under initializeShutdownLock. Registration is immutable until reset,
+// newContainer is called under initializeShutdownLock. Registration is immutable until reset,
 // which replaces these maps instead of modifying the captured maps.
 func newContainer() *container {
 	c := &container{
@@ -199,6 +188,8 @@ func (c *container) constructionNode(ctx context.Context, id string, r *resoluti
 	return n, false, nil
 }
 
+// build allocates and injects fields; initialize runs lifecycle hooks afterward.
+// Singleton pointers are published early so tagged singleton cycles can be wired.
 func (c *container) build(ctx context.Context, id string, r *resolution, path map[string]bool) (n *beanNode, err error) {
 	n, existing, err := c.constructionNode(ctx, id, r, path)
 	if err != nil || existing {
@@ -249,13 +240,29 @@ func (c *container) build(ctx context.Context, id string, r *resolution, path ma
 	return n, nil
 }
 
+// initialize runs dependency hooks before consumer hooks. Field dependencies
+// join an initialization already owned by another resolution, except within a
+// singleton cycle, whose members cannot all finish before each other.
 func (c *container) initialize(n *beanNode, path map[*beanNode]bool) (err error) {
 	c.mu.Lock()
-	if n.state == ready || n.state == initializingBean || path[n] {
-		// Preserve singleton lookup from its own hook (or a singleton cycle).
-		// Applications must wait for startup before sharing these instances.
+	if n.state == ready || path[n] {
 		c.mu.Unlock()
 		return nil
+	}
+	if n.state == initializingBean {
+		// A public lookup has no tagged parent. Preserve callback self-lookups;
+		// tracking cycles through callbacks needs a separate resolver API.
+		if len(path) == 0 || c.dependsOnPath(n, path, make(map[*beanNode]bool)) {
+			c.mu.Unlock()
+			return nil
+		}
+		done := n.initializationDone
+		c.mu.Unlock()
+		<-done
+		c.mu.Lock()
+		err = n.err
+		c.mu.Unlock()
+		return err
 	}
 	if n.state == failed {
 		c.mu.Unlock()
@@ -266,15 +273,21 @@ func (c *container) initialize(n *beanNode, path map[*beanNode]bool) (err error)
 		return errors.New("bean initialization is already in progress: " + n.id)
 	}
 	n.state = initializingBean
+	n.initializationDone = make(chan struct{})
 	c.mu.Unlock()
 	path[n] = true
 	defer delete(path, n)
 	defer func() {
-		if err != nil {
-			c.mu.Lock()
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if n.state != ready {
+			if err == nil {
+				// Publish failure to waiters while preserving the owner's panic.
+				err = errors.New("bean initialization aborted: " + n.id)
+			}
 			n.state, n.err = failed, err
-			c.mu.Unlock()
 		}
+		close(n.initializationDone)
 	}()
 	for _, dep := range n.dependencies {
 		if err = c.initialize(dep, path); err != nil {
@@ -293,6 +306,26 @@ func (c *container) initialize(n *beanNode, path map[*beanNode]bool) (err error)
 	return nil
 }
 
+// dependsOnPath detects a tagged cycle spanning concurrent resolutions. The
+// caller holds c.mu; a node's dependency list is immutable once wiring finishes.
+func (c *container) dependsOnPath(n *beanNode, path, seen map[*beanNode]bool) bool {
+	if path[n] {
+		return true
+	}
+	if seen[n] || n.state < wired {
+		return false
+	}
+	seen[n] = true
+	for _, dep := range n.dependencies {
+		if c.dependsOnPath(dep, path, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+// finishInitialization commits startup only after all admitted lookups have
+// exited. The caller holds initializeShutdownLock to prevent new admissions.
 func (c *container) finishInitialization() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -318,6 +351,8 @@ func (c *container) finishInitialization() error {
 	return nil
 }
 
+// rollback releases resources created by a failed startup, retaining supplied
+// instances for a retry. Startup and admitted lookups must have stopped first.
 func (c *container) rollback() {
 	var incomplete []*beanNode
 	for _, n := range c.created {

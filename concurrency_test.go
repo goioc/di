@@ -1,17 +1,3 @@
-/*
- * Copyright (c) 2024 Go IoC
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- */
-
 package di
 
 import (
@@ -391,6 +377,89 @@ func TestStartupWaitsForParallelSingletonInitialization(t *testing.T) {
 			require.Equal(t, 1, closed)
 			_, err = GetInstanceSafe("z-worker")
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestFieldInjectionWaitsForParallelInitialization(t *testing.T) {
+	for _, outcome := range []string{"success", "error", "panic"} {
+		t.Run(outcome, func(t *testing.T) {
+			defer resetContainer()
+			started, releaseHook := make(chan struct{}), make(chan struct{})
+			consumerInitialized := make(chan struct{}, 1)
+			lookupDone := make(chan struct{})
+			var lookupErr error
+			var lookupPanic interface{}
+			failure := errors.New("dependency hook failed")
+			_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (interface{}, error) {
+				return &callbackBean{initHook: func() error {
+					close(started)
+					<-releaseHook
+					switch outcome {
+					case "error":
+						return failure
+					case "panic":
+						panic(failure)
+					}
+					return nil
+				}}, nil
+			})
+			require.NoError(t, err)
+			_, err = RegisterBean("b-consumer", reflect.TypeOf((*dependencyFailureConsumer)(nil)))
+			require.NoError(t, err)
+			require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*dependencyFailureConsumer)(nil)), func(interface{}) error {
+				consumerInitialized <- struct{}{}
+				return nil
+			}))
+			_, err = RegisterBeanFactory("a-launcher", Singleton, func(context.Context) (interface{}, error) {
+				go func() {
+					defer func() { lookupPanic = recover(); close(lookupDone) }()
+					_, lookupErr = GetInstanceSafe("dependency")
+				}()
+				<-started
+				return new(string), nil
+			})
+			require.NoError(t, err)
+			done := make(chan error, 1)
+			go func() { done <- InitializeContainer() }()
+			<-started
+			select {
+			case <-consumerInitialized:
+				t.Error("consumer initialized before its dependency hook finished")
+			case <-time.After(50 * time.Millisecond):
+			}
+			close(releaseHook)
+			<-lookupDone
+			var initializationErr error
+			select {
+			case initializationErr = <-done:
+			case <-time.After(time.Second):
+				t.Fatal("dependency completion did not release its consumer")
+			}
+			switch outcome {
+			case "success":
+				require.NoError(t, initializationErr)
+				require.NoError(t, lookupErr)
+				require.Nil(t, lookupPanic)
+				select {
+				case <-consumerInitialized:
+				default:
+					t.Error("consumer did not initialize after its dependency completed")
+				}
+			case "error":
+				require.ErrorIs(t, initializationErr, failure)
+				require.ErrorIs(t, lookupErr, failure)
+			case "panic":
+				require.EqualError(t, initializationErr, "bean initialization aborted: dependency")
+				require.Same(t, failure, lookupPanic)
+			}
+			if outcome != "success" {
+				select {
+				case <-consumerInitialized:
+					t.Error("consumer initialized despite its dependency failing")
+				default:
+				}
+			}
 		})
 	}
 }

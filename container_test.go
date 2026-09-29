@@ -1,17 +1,3 @@
-/*
- * Copyright (c) 2024 Go IoC
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- */
-
 package di
 
 import (
@@ -19,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -127,4 +114,105 @@ func TestInjectorRejectsValueFieldsBeforeResolvingDependencies(t *testing.T) {
 	require.EqualError(t, err, unsupportedDependencyType)
 	require.False(t, resolved)
 	require.Equal(t, "unchanged", instance.Value)
+}
+
+type parallelCycleOwner struct {
+	Gate *callbackBean      `di.inject:"gate"`
+	Peer *parallelCyclePeer `di.inject:"peer"`
+}
+
+type parallelCyclePeer struct {
+	Owner *parallelCycleOwner `di.inject:"owner"`
+}
+
+func TestParallelSingletonFieldCycleDoesNotDeadlock(t *testing.T) {
+	defer resetContainer()
+	started, releaseHook := make(chan struct{}), make(chan struct{})
+	_, err := RegisterBeanFactory("gate", Singleton, func(context.Context) (interface{}, error) {
+		return &callbackBean{initHook: func() error { close(started); <-releaseHook; return nil }}, nil
+	})
+	require.NoError(t, err)
+	_, err = RegisterBean("owner", reflect.TypeOf((*parallelCycleOwner)(nil)))
+	require.NoError(t, err)
+	_, err = RegisterBean("peer", reflect.TypeOf((*parallelCyclePeer)(nil)))
+	require.NoError(t, err)
+	c := containerForTest()
+	// Wire the cycle once, then overlap initialization from its two entry points.
+	owner, err := c.build(context.Background(), "owner", &resolution{}, make(map[string]bool))
+	require.NoError(t, err)
+	ownerDone := make(chan error, 1)
+	go func() { ownerDone <- c.initialize(owner, make(map[*beanNode]bool)) }()
+	<-started
+	peerDone := make(chan error, 1)
+	go func() { _, err := c.resolve(context.Background(), "peer"); peerDone <- err }()
+	select {
+	case err := <-peerDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Error("concurrent entry into a singleton field cycle deadlocked")
+	}
+	close(releaseHook)
+	select {
+	case err := <-ownerDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("owner initialization did not complete")
+	}
+	instance := owner.instance.(*parallelCycleOwner)
+	require.Same(t, instance, instance.Peer.Owner)
+}
+
+func TestConsumerOutsideCycleWaitsForCycleInitialization(t *testing.T) {
+	defer resetContainer()
+	started, releaseHook := make(chan struct{}), make(chan struct{})
+	_, err := RegisterBean("a", reflect.TypeOf((*singletonCycleA)(nil)))
+	require.NoError(t, err)
+	_, err = RegisterBean("b", reflect.TypeOf((*singletonCycleB)(nil)))
+	require.NoError(t, err)
+	_, err = RegisterBean("consumer", reflect.TypeOf((*cycleConsumer)(nil)))
+	require.NoError(t, err)
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleA)(nil)), func(interface{}) error {
+		close(started)
+		<-releaseHook
+		return nil
+	}))
+	c := containerForTest()
+	cycleDone := make(chan error, 1)
+	go func() { _, err := c.resolve(context.Background(), "a"); cycleDone <- err }()
+	<-started
+	consumerDone := make(chan error, 1)
+	go func() { _, err := c.resolve(context.Background(), "consumer"); consumerDone <- err }()
+	select {
+	case <-consumerDone:
+		t.Error("consumer treated an unrelated cycle as its own initialization path")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseHook)
+	require.NoError(t, <-cycleDone)
+	select {
+	case err := <-consumerDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("cycle completion did not release its consumer")
+	}
+}
+
+type cycleConsumer struct {
+	Dependency *singletonCycleA `di.inject:"a"`
+}
+
+func TestStartupCommitRejectsIncompleteSingleton(t *testing.T) {
+	defer resetContainer()
+	_, err := RegisterBeanInstance("bean", new(string))
+	require.NoError(t, err)
+	c := containerForTest()
+	// Committing an incomplete startup must keep rollback ownership intact.
+	require.EqualError(t, c.finishInitialization(), "singleton initialization did not complete: bean")
+	require.True(t, c.starting)
+	require.Len(t, c.created, 1)
+	_, err = c.resolve(context.Background(), "bean")
+	require.NoError(t, err)
+	require.NoError(t, c.finishInitialization())
+	require.False(t, c.starting)
+	require.Empty(t, c.created)
 }
