@@ -470,13 +470,16 @@ func (c *container) claimCleanup(n *beanNode, includeSingletons, includeProvided
 // Close are logged, so one misbehaving bean cannot abort cleanup of the rest.
 func closeBean(id string, instance interface{}) {
 	if closer, ok := instance.(io.Closer); ok {
+		closed := false
 		defer func() {
-			if p := recover(); p != nil {
+			if !closed {
+				p := recover()
 				logger.WithField("beanID", id).Errorf("panic while closing bean: %v", p)
 			}
 		}()
 		if err := closer.Close(); err != nil {
 			logger.WithField("beanID", id).Error(err)
 		}
+		closed = true
 	}
 }

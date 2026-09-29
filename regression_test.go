@@ -113,6 +113,12 @@ func (b *panicCloser) Close() error {
 	panic("closer exploded")
 }
 
+type nilPanicCloser struct{}
+
+func (*nilPanicCloser) Close() error {
+	panic(nil)
+}
+
 type calmCloser struct {
 	closed *bool
 }
@@ -142,5 +148,19 @@ func TestPanicInCloserDoesNotAbortShutdown(t *testing.T) {
 	require.NotPanics(t, func() { Close() })
 	require.True(t, panicked, "the panicking bean must still be closed")
 	require.True(t, otherClosed, "beans after the panicking one must still be closed")
+	require.Contains(t, logBuf.String(), "panic while closing bean")
+}
+
+func TestNilPanicInCloserIsLogged(t *testing.T) {
+	defer resetContainer()
+
+	var logBuf bytes.Buffer
+	originalOut := logger.Out
+	logger.SetOutput(&logBuf)
+	defer logger.SetOutput(originalOut)
+
+	_, err := RegisterBeanInstance("nil-panicky", &nilPanicCloser{})
+	require.NoError(t, err)
+	require.NotPanics(t, func() { Close() })
 	require.Contains(t, logBuf.String(), "panic while closing bean")
 }
