@@ -126,10 +126,25 @@ func TestCloseUsesReverseDependencyOrder(t *testing.T) {
 }
 
 type singletonCycleA struct {
-	B *singletonCycleB `di.inject:"b"`
+	B      *singletonCycleB `di.inject:"b"`
+	events *[]string
 }
 type singletonCycleB struct {
 	A *singletonCycleA `di.inject:"a"`
+}
+
+func (b *singletonCycleA) Close() error {
+	if b.events != nil {
+		*b.events = append(*b.events, "a closed")
+	}
+	return nil
+}
+
+func (b *singletonCycleB) Close() error {
+	if b.A.events != nil {
+		*b.A.events = append(*b.A.events, "b closed")
+	}
+	return nil
 }
 
 func (b *singletonCycleB) PostConstruct() error {
@@ -148,6 +163,71 @@ func TestSingletonFieldCyclesRemainSupported(t *testing.T) {
 	require.NoError(t, InitializeContainer())
 	a := GetInstance("a").(*singletonCycleA)
 	require.Same(t, a, a.B.A)
+}
+
+func TestCloseReversesInitializationForSingletonCycle(t *testing.T) {
+	defer resetContainer()
+	var events []string
+	_, err := RegisterBean("a", reflect.TypeOf((*singletonCycleA)(nil)))
+	require.NoError(t, err)
+	_, err = RegisterBean("b", reflect.TypeOf((*singletonCycleB)(nil)))
+	require.NoError(t, err)
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleB)(nil)), func(interface{}) error {
+		events = append(events, "b initialized")
+		return nil
+	}))
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleA)(nil)), func(instance interface{}) error {
+		instance.(*singletonCycleA).events = &events
+		events = append(events, "a initialized")
+		return nil
+	}))
+	require.NoError(t, InitializeContainer())
+	Close()
+	require.Equal(t, []string{"b initialized", "a initialized", "a closed", "b closed"}, events)
+}
+
+type zeroSizeResource struct{}
+
+var zeroSizeResourceCloses int
+
+func (*zeroSizeResource) Close() error { zeroSizeResourceCloses++; return nil }
+
+func TestFailedResolutionPreservesZeroSizeProvidedAlias(t *testing.T) {
+	for _, scope := range []Scope{Singleton, Prototype, Request} {
+		t.Run(string(scope), func(t *testing.T) {
+			defer resetContainer()
+			zeroSizeResourceCloses = 0
+			provided := &zeroSizeResource{}
+			_, err := RegisterBeanInstance("a-provided", provided)
+			require.NoError(t, err)
+			_, err = RegisterBeanFactory("z-alias", scope, func(context.Context) (interface{}, error) { return provided, nil })
+			require.NoError(t, err)
+			calls := 0
+			failure := errors.New("alias initialization failed")
+			require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf(provided), func(interface{}) error {
+				calls++
+				if calls == 2 {
+					return failure
+				}
+				return nil
+			}))
+			err = InitializeContainer()
+			if scope == Singleton {
+				require.ErrorIs(t, err, failure)
+			} else {
+				require.NoError(t, err)
+				if scope == Prototype {
+					_, err = GetInstanceSafe("z-alias")
+					require.ErrorIs(t, err, failure)
+				} else {
+					require.PanicsWithValue(t, failure, func() { getRequestBeanInstance(context.Background(), "z-alias") })
+				}
+			}
+			require.Zero(t, zeroSizeResourceCloses, "failed alias must not close a provided instance")
+			Close()
+			require.Equal(t, 1, zeroSizeResourceCloses)
+		})
+	}
 }
 
 func TestSingletonCanLookupItselfInPostConstruct(t *testing.T) {

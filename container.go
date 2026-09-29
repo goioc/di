@@ -128,9 +128,18 @@ type resolution struct {
 
 func (c *container) resolve(ctx context.Context, id string) (instance interface{}, err error) {
 	r := &resolution{}
+	var cancelRequest context.CancelFunc
+	if c.scopes[id] == Request {
+		// A failed request must stop its context-bound work before its closers run.
+		// On success the middleware-owned parent controls this context's lifetime.
+		ctx, cancelRequest = context.WithCancel(ctx)
+	}
 	succeeded := false
 	defer func() {
 		if !succeeded {
+			if cancelRequest != nil {
+				cancelRequest()
+			}
 			c.closeNodes(r.created, false, false)
 		}
 	}()
@@ -302,12 +311,16 @@ func (c *container) rollback() {
 }
 
 func (c *container) closeSingletons() {
-	// Preserve completion order for dependencies discovered inside callbacks too.
-	nodes := append([]*beanNode(nil), c.completed...)
-	for _, id := range c.ids(Singleton) {
-		nodes = append(nodes, c.singletons[id])
+	// Completion order already captures dependencies, including callback lookups
+	// and singleton cycles. A second graph traversal can reorder cycle members.
+	nodes := c.completed
+	if len(nodes) == 0 {
+		// Close can also dispose of supplied instances before initialization.
+		for _, id := range c.ids(Singleton) {
+			nodes = append(nodes, c.singletons[id])
+		}
 	}
-	c.closeNodes(nodes, true, true)
+	c.closeOrderedNodes(nodes, true, true)
 }
 
 // dependencyOrder visits dependencies before their owners and tolerates singleton cycles.
@@ -336,7 +349,10 @@ func dependencyOrder(nodes []*beanNode) []*beanNode {
 }
 
 func (c *container) closeNodes(nodes []*beanNode, includeSingletons, includeProvided bool) {
-	ordered := dependencyOrder(nodes)
+	c.closeOrderedNodes(dependencyOrder(nodes), includeSingletons, includeProvided)
+}
+
+func (c *container) closeOrderedNodes(ordered []*beanNode, includeSingletons, includeProvided bool) {
 	closed := make(map[interface{}]bool)
 	for i := len(ordered) - 1; i >= 0; i-- {
 		n := ordered[i]
@@ -353,7 +369,9 @@ func hasInstanceIdentity(value interface{}) bool {
 
 // Called with c.mu held. A failed resolution must not dispose of an existing singleton.
 func (c *container) preserveInstance(n *beanNode, includeSingletons, includeProvided bool) bool {
-	if !includeProvided && (n.provided || hasInstanceIdentity(n.instance) && c.provided[n.instance]) {
+	// Equal zero-size pointers may be aliases or distinct allocations. Prefer
+	// retaining an existing owner's instance when that distinction is ambiguous.
+	if !includeProvided && (n.provided || c.provided[n.instance]) {
 		return true
 	}
 	if includeSingletons {
@@ -362,11 +380,9 @@ func (c *container) preserveInstance(n *beanNode, includeSingletons, includeProv
 	if n.scope == Singleton {
 		return true
 	}
-	if hasInstanceIdentity(n.instance) {
-		for _, singleton := range c.singletons {
-			if singleton.instance == n.instance {
-				return true
-			}
+	for _, singleton := range c.singletons {
+		if singleton.instance == n.instance {
+			return true
 		}
 	}
 	return false

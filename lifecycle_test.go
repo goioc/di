@@ -21,6 +21,9 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 type lifecycleContextBean struct{ ctx context.Context }
@@ -150,6 +153,80 @@ func TestFailedRequestCleanup(t *testing.T) {
 	// A failed bean never reaches middleware's close-goroutine registration.
 	if !b.closed {
 		t.Error("failed request bean was discarded without Close")
+	}
+}
+
+func TestFailedRequestCancelsBeforeCleanup(t *testing.T) {
+	for _, failureMode := range []string{"initialization error", "initialization panic", "postprocessor error"} {
+		t.Run(failureMode, func(t *testing.T) {
+			defer resetContainer()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			failure := errors.New(failureMode)
+			closed := make(chan struct{})
+			_, err := RegisterBeanFactory("request", Request, func(ctx context.Context) (interface{}, error) {
+				return &callbackBean{
+					initHook: func() error {
+						switch failureMode {
+						case "initialization error":
+							return failure
+						case "initialization panic":
+							panic(failure)
+						}
+						return nil
+					},
+					closeHook: func() error { <-ctx.Done(); close(closed); return nil },
+				}, nil
+			})
+			require.NoError(t, err)
+			if failureMode == "postprocessor error" {
+				require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*callbackBean)(nil)), func(interface{}) error { return failure }))
+			}
+			require.NoError(t, InitializeContainer())
+			done := make(chan interface{}, 1)
+			go func() {
+				defer func() { done <- recover() }()
+				Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					t.Error("handler called despite failed request initialization")
+				})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil).WithContext(ctx))
+			}()
+			select {
+			case recovered := <-done:
+				require.Same(t, failure, recovered)
+			case <-time.After(time.Second):
+				// Release a broken implementation before resetting the shared container.
+				cancel()
+				<-done
+				t.Fatal("failed request cleanup waited for external cancellation")
+			}
+			select {
+			case <-closed:
+			default:
+				t.Fatal("failed request was not closed")
+			}
+			require.NoError(t, ctx.Err(), "middleware must not cancel the caller's context")
+		})
+	}
+}
+
+func TestSuccessfulRequestContextLivesUntilHandlerReturns(t *testing.T) {
+	defer resetContainer()
+	var requestContext context.Context
+	closed := make(chan struct{})
+	_, err := RegisterBeanFactory("request", Request, func(ctx context.Context) (interface{}, error) {
+		requestContext = ctx
+		return &callbackBean{closeHook: func() error { <-ctx.Done(); close(closed); return nil }}, nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, InitializeContainer())
+	Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		require.NoError(t, requestContext.Err(), "request context canceled before handler returned")
+	})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	require.ErrorIs(t, requestContext.Err(), context.Canceled)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("successful request was not closed")
 	}
 }
 
