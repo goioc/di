@@ -258,7 +258,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 		return &request, nil
 	}
 
-	return nil, fmt.Errorf("%w:%s", ErrUnsupportedScope, beanScope)
+	return nil, fmt.Errorf("%w: %s", ErrUnsupportedScope, beanScope)
 }
 
 func injectSingletonDependencies() error {
