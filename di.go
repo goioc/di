@@ -64,9 +64,9 @@ type InitializingBean interface {
 }
 
 // ContextAwareBean receives a context before PostConstruct and postprocessors.
-// Request beans and the beans they inject receive a context derived from the
-// HTTP request; standalone singleton and prototype resolutions receive
-// context.Background. Failed request initialization cancels its context
+// Request beans and their prototype dependencies receive a context derived from
+// the HTTP request; singleton dependencies and standalone prototype resolutions
+// receive context.Background. Failed request initialization cancels its context
 // before cleanup, and successful request contexts end when their parent is canceled.
 type ContextAwareBean interface {
 	// SetContext supplies the bean's context before its initialization callbacks.
