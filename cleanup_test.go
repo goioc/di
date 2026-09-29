@@ -17,14 +17,14 @@ type cleanupParent struct {
 func TestFailedResolutionClosesInjectedPrototypes(t *testing.T) {
 	defer resetContainer()
 	closed := 0
-	_, err := RegisterBeanFactory("child", Prototype, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("child", Prototype, func(context.Context) (any, error) {
 		return &callbackBean{closeHook: func() error { closed++; return nil }}, nil
 	})
 	require.NoError(t, err)
-	_, err = RegisterBean("parent", reflect.TypeOf((*cleanupParent)(nil)))
+	_, err = RegisterBean("parent", reflect.TypeFor[*cleanupParent]())
 	require.NoError(t, err)
 	failure := errors.New("postprocessor failed")
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*cleanupParent)(nil)), func(interface{}) error { return failure }))
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*cleanupParent](), func(any) error { return failure }))
 	require.NoError(t, InitializeContainer())
 	_, err = GetInstanceSafe("parent")
 	require.ErrorIs(t, err, failure)
@@ -38,7 +38,7 @@ func TestRollbackPreservesProvidedInstances(t *testing.T) {
 	_, err := RegisterBeanInstance("provided", provided)
 	require.NoError(t, err)
 	attempt := 0
-	_, err = RegisterBeanFactory("created", Singleton, func(context.Context) (interface{}, error) {
+	_, err = RegisterBeanFactory("created", Singleton, func(context.Context) (any, error) {
 		attempt++
 		fail := attempt == 1
 		return &callbackBean{
@@ -100,11 +100,11 @@ func (b *orderedConsumer) Close() error {
 func TestCloseUsesReverseDependencyOrder(t *testing.T) {
 	defer resetContainer()
 	var events []string
-	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (any, error) {
 		return &orderedDependency{events: &events}, nil
 	})
 	require.NoError(t, err)
-	_, err = RegisterBean("consumer", reflect.TypeOf((*orderedConsumer)(nil)))
+	_, err = RegisterBean("consumer", reflect.TypeFor[*orderedConsumer]())
 	require.NoError(t, err)
 	require.NoError(t, InitializeContainer())
 	Close()
@@ -142,9 +142,9 @@ func (b *singletonCycleB) PostConstruct() error {
 
 func TestSingletonFieldCyclesRemainSupported(t *testing.T) {
 	defer resetContainer()
-	_, err := RegisterBean("a", reflect.TypeOf((*singletonCycleA)(nil)))
+	_, err := RegisterBean("a", reflect.TypeFor[*singletonCycleA]())
 	require.NoError(t, err)
-	_, err = RegisterBean("b", reflect.TypeOf((*singletonCycleB)(nil)))
+	_, err = RegisterBean("b", reflect.TypeFor[*singletonCycleB]())
 	require.NoError(t, err)
 	require.NoError(t, InitializeContainer())
 	a := GetInstance("a").(*singletonCycleA)
@@ -154,15 +154,15 @@ func TestSingletonFieldCyclesRemainSupported(t *testing.T) {
 func TestCloseReversesInitializationForSingletonCycle(t *testing.T) {
 	defer resetContainer()
 	var events []string
-	_, err := RegisterBean("a", reflect.TypeOf((*singletonCycleA)(nil)))
+	_, err := RegisterBean("a", reflect.TypeFor[*singletonCycleA]())
 	require.NoError(t, err)
-	_, err = RegisterBean("b", reflect.TypeOf((*singletonCycleB)(nil)))
+	_, err = RegisterBean("b", reflect.TypeFor[*singletonCycleB]())
 	require.NoError(t, err)
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleB)(nil)), func(interface{}) error {
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*singletonCycleB](), func(any) error {
 		events = append(events, "b initialized")
 		return nil
 	}))
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleA)(nil)), func(instance interface{}) error {
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*singletonCycleA](), func(instance any) error {
 		instance.(*singletonCycleA).events = &events
 		events = append(events, "a initialized")
 		return nil
@@ -176,15 +176,15 @@ func TestRollbackClosesFailedCycleOwnerBeforeInitializedDependency(t *testing.T)
 	defer resetContainer()
 	var events []string
 	failure := errors.New("cycle owner failed")
-	_, err := RegisterBean("a", reflect.TypeOf((*singletonCycleA)(nil)))
+	_, err := RegisterBean("a", reflect.TypeFor[*singletonCycleA]())
 	require.NoError(t, err)
-	_, err = RegisterBean("b", reflect.TypeOf((*singletonCycleB)(nil)))
+	_, err = RegisterBean("b", reflect.TypeFor[*singletonCycleB]())
 	require.NoError(t, err)
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleB)(nil)), func(interface{}) error {
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*singletonCycleB](), func(any) error {
 		events = append(events, "b initialized")
 		return nil
 	}))
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleA)(nil)), func(instance interface{}) error {
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*singletonCycleA](), func(instance any) error {
 		instance.(*singletonCycleA).events = &events
 		events = append(events, "a failed")
 		return failure
@@ -196,14 +196,14 @@ func TestRollbackClosesFailedCycleOwnerBeforeInitializedDependency(t *testing.T)
 func TestRollbackClosesFailedSingletonBeforePrototypeDependency(t *testing.T) {
 	defer resetContainer()
 	var events []string
-	_, err := RegisterBeanFactory("dependency", Prototype, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("dependency", Prototype, func(context.Context) (any, error) {
 		return &orderedDependency{events: &events}, nil
 	})
 	require.NoError(t, err)
-	_, err = RegisterBean("consumer", reflect.TypeOf((*orderedConsumer)(nil)))
+	_, err = RegisterBean("consumer", reflect.TypeFor[*orderedConsumer]())
 	require.NoError(t, err)
 	failure := errors.New("consumer postprocessor failed")
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*orderedConsumer)(nil)), func(interface{}) error { return failure }))
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*orderedConsumer](), func(any) error { return failure }))
 	require.ErrorIs(t, InitializeContainer(), failure)
 	require.Equal(t, []string{"dependency initialized", "consumer initialized", "consumer closed", "dependency closed"}, events)
 }
@@ -222,11 +222,11 @@ func TestFailedResolutionPreservesZeroSizeProvidedAlias(t *testing.T) {
 			provided := &zeroSizeResource{}
 			_, err := RegisterBeanInstance("a-provided", provided)
 			require.NoError(t, err)
-			_, err = RegisterBeanFactory("z-alias", scope, func(context.Context) (interface{}, error) { return provided, nil })
+			_, err = RegisterBeanFactory("z-alias", scope, func(context.Context) (any, error) { return provided, nil })
 			require.NoError(t, err)
 			calls := 0
 			failure := errors.New("alias initialization failed")
-			require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf(provided), func(interface{}) error {
+			require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*zeroSizeResource](), func(any) error {
 				calls++
 				if calls == 2 {
 					return failure
@@ -255,7 +255,7 @@ func TestFailedResolutionPreservesZeroSizeProvidedAlias(t *testing.T) {
 func TestSingletonCanLookupItselfInPostConstruct(t *testing.T) {
 	defer resetContainer()
 	var self *callbackBean
-	_, err := RegisterBeanFactory("self", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("self", Singleton, func(context.Context) (any, error) {
 		self = &callbackBean{initHook: func() error {
 			got, err := GetInstanceSafe("self")
 			if err != nil {
@@ -276,7 +276,7 @@ func TestInitializationPanicRollsBackAndCanRetry(t *testing.T) {
 	defer resetContainer()
 	closed := 0
 	panicOnce := true
-	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		return &callbackBean{
 			initHook: func() error {
 				if panicOnce {
@@ -316,7 +316,7 @@ func TestFailedResolutionPreservesFactorySingletonAlias(t *testing.T) {
 		id    string
 		scope Scope
 	}{{"singleton", Singleton}, {"alias", Prototype}} {
-		_, err := RegisterBeanFactory(registration.id, registration.scope, func(context.Context) (interface{}, error) { return shared, nil })
+		_, err := RegisterBeanFactory(registration.id, registration.scope, func(context.Context) (any, error) { return shared, nil })
 		require.NoError(t, err)
 	}
 	require.NoError(t, InitializeContainer())
@@ -333,7 +333,7 @@ func TestShutdownClosesSharedFactoryInstanceOnce(t *testing.T) {
 	closed := 0
 	shared := &callbackBean{closeHook: func() error { closed++; return nil }}
 	for _, id := range []string{"a", "b"} {
-		_, err := RegisterBeanFactory(id, Singleton, func(context.Context) (interface{}, error) { return shared, nil })
+		_, err := RegisterBeanFactory(id, Singleton, func(context.Context) (any, error) { return shared, nil })
 		require.NoError(t, err)
 	}
 	require.NoError(t, InitializeContainer())
@@ -347,7 +347,7 @@ func TestShutdownClosesZeroSizeProvidedAliasOnce(t *testing.T) {
 	provided := &zeroSizeResource{}
 	_, err := RegisterBeanInstance("provided", provided)
 	require.NoError(t, err)
-	_, err = RegisterBeanFactory("alias", Singleton, func(context.Context) (interface{}, error) { return provided, nil })
+	_, err = RegisterBeanFactory("alias", Singleton, func(context.Context) (any, error) { return provided, nil })
 	require.NoError(t, err)
 	require.NoError(t, InitializeContainer())
 	Close()
@@ -358,15 +358,15 @@ func TestFailedSingletonLookupKeepsOriginalError(t *testing.T) {
 	defer resetContainer()
 	failure := errors.New("dependency initialization failed")
 	initialized, closed := 0, 0
-	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (any, error) {
 		return &callbackBean{
 			initHook:  func() error { initialized++; return failure },
 			closeHook: func() error { closed++; return nil },
 		}, nil
 	})
 	require.NoError(t, err)
-	_, err = RegisterBeanFactory("consumer", Singleton, func(context.Context) (interface{}, error) {
-		for i := 0; i < 2; i++ {
+	_, err = RegisterBeanFactory("consumer", Singleton, func(context.Context) (any, error) {
+		for range 2 {
 			instance, err := GetInstanceSafe("dependency")
 			require.Nil(t, instance)
 			require.ErrorIs(t, err, failure)

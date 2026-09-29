@@ -47,12 +47,12 @@ func TestCallbacksCanInspectContainer(t *testing.T) {
 			panic("registration allowed during callback")
 		}
 	}
-	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		inspect()
 		return &callbackBean{contextHook: inspect, initHook: func() error { inspect(); return nil }, closeHook: func() error { inspect(); return nil }}, nil
 	})
 	require.NoError(t, err)
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*callbackBean)(nil)), func(interface{}) error { inspect(); return nil }))
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*callbackBean](), func(any) error { inspect(); return nil }))
 	done := make(chan error, 1)
 	go func() {
 		err := InitializeContainer()
@@ -73,7 +73,7 @@ func TestCloseWaitsForActiveLookup(t *testing.T) {
 	closed := make(chan struct{})
 	_, err := RegisterBeanInstance("singleton", &callbackBean{closeHook: func() error { close(closed); return nil }})
 	require.NoError(t, err)
-	_, err = RegisterBeanFactory("prototype", Prototype, func(context.Context) (interface{}, error) {
+	_, err = RegisterBeanFactory("prototype", Prototype, func(context.Context) (any, error) {
 		close(started)
 		<-releaseFactory
 		return new(string), nil
@@ -121,17 +121,15 @@ func TestConcurrentLookupAndClose(t *testing.T) {
 	require.NoError(t, InitializeContainer())
 	var workers sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < 8; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+	for range 8 {
+		workers.Go(func() {
 			<-start
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				_, _ = GetInstanceSafe("bean")
 				GetBeanTypes()
 				GetBeanScopes()
 			}
-		}()
+		})
 	}
 	close(start)
 	Close()
@@ -180,7 +178,7 @@ func TestConcurrentCloseWaitsForCleanup(t *testing.T) {
 func TestRequestCloseErrorDoesNotPanic(t *testing.T) {
 	defer resetContainer()
 	closed := make(chan struct{})
-	_, err := RegisterBeanFactory("request", Request, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("request", Request, func(context.Context) (any, error) {
 		return &callbackBean{closeHook: func() error { defer close(closed); return errors.New("cleanup failed") }}, nil
 	})
 	require.NoError(t, err)
@@ -196,7 +194,7 @@ func TestRequestCloseErrorDoesNotPanic(t *testing.T) {
 func TestLookupRejectsSingletonUnderConstruction(t *testing.T) {
 	defer resetContainer()
 	started, releaseFactory := make(chan struct{}), make(chan struct{})
-	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (any, error) {
 		close(started)
 		<-releaseFactory
 		return new(string), nil
@@ -257,14 +255,14 @@ func TestRollbackWaitsForActiveLookup(t *testing.T) {
 	started, releaseFactory := make(chan struct{}), make(chan struct{})
 	lookupDone := make(chan error, 1)
 	closed := 0
-	_, err := RegisterBeanFactory("prototype", Prototype, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("prototype", Prototype, func(context.Context) (any, error) {
 		close(started)
 		<-releaseFactory
 		return &callbackBean{closeHook: func() error { closed++; return nil }}, nil
 	})
 	require.NoError(t, err)
 	failure := errors.New("startup failed during lookup")
-	_, err = RegisterBeanFactory("singleton", Singleton, func(context.Context) (interface{}, error) {
+	_, err = RegisterBeanFactory("singleton", Singleton, func(context.Context) (any, error) {
 		return &callbackBean{
 			initHook: func() error {
 				go func() { _, err := GetInstanceSafe("prototype"); lookupDone <- err }()
@@ -316,10 +314,10 @@ func TestStartupWaitsForParallelSingletonInitialization(t *testing.T) {
 			started, releaseHook := make(chan struct{}), make(chan struct{})
 			lookupDone := make(chan struct{})
 			var lookupErr error
-			var lookupPanic interface{}
+			var lookupPanic any
 			closed := 0
 			failure := errors.New("parallel initialization failed")
-			_, err := RegisterBeanFactory("z-worker", Singleton, func(context.Context) (interface{}, error) {
+			_, err := RegisterBeanFactory("z-worker", Singleton, func(context.Context) (any, error) {
 				return &callbackBean{
 					initHook: func() error {
 						close(started)
@@ -336,7 +334,7 @@ func TestStartupWaitsForParallelSingletonInitialization(t *testing.T) {
 				}, nil
 			})
 			require.NoError(t, err)
-			_, err = RegisterBeanFactory("a-launcher", Singleton, func(context.Context) (interface{}, error) {
+			_, err = RegisterBeanFactory("a-launcher", Singleton, func(context.Context) (any, error) {
 				go func() {
 					defer func() { lookupPanic = recover(); close(lookupDone) }()
 					_, lookupErr = GetInstanceSafe("z-worker")
@@ -389,9 +387,9 @@ func TestFieldInjectionWaitsForParallelInitialization(t *testing.T) {
 			consumerInitialized := make(chan struct{}, 1)
 			lookupDone := make(chan struct{})
 			var lookupErr error
-			var lookupPanic interface{}
+			var lookupPanic any
 			failure := errors.New("dependency hook failed")
-			_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (interface{}, error) {
+			_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (any, error) {
 				return &callbackBean{initHook: func() error {
 					close(started)
 					<-releaseHook
@@ -405,13 +403,13 @@ func TestFieldInjectionWaitsForParallelInitialization(t *testing.T) {
 				}}, nil
 			})
 			require.NoError(t, err)
-			_, err = RegisterBean("b-consumer", reflect.TypeOf((*dependencyFailureConsumer)(nil)))
+			_, err = RegisterBean("b-consumer", reflect.TypeFor[*dependencyFailureConsumer]())
 			require.NoError(t, err)
-			require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*dependencyFailureConsumer)(nil)), func(interface{}) error {
+			require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*dependencyFailureConsumer](), func(any) error {
 				consumerInitialized <- struct{}{}
 				return nil
 			}))
-			_, err = RegisterBeanFactory("a-launcher", Singleton, func(context.Context) (interface{}, error) {
+			_, err = RegisterBeanFactory("a-launcher", Singleton, func(context.Context) (any, error) {
 				go func() {
 					defer func() { lookupPanic = recover(); close(lookupDone) }()
 					_, lookupErr = GetInstanceSafe("dependency")

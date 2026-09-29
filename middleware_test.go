@@ -31,10 +31,10 @@ func (rb *requestBean) Close() error {
 
 func (suite *TestSuite) TestMiddleware() {
 	created := make(chan *requestBean, 1)
-	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*singletonBean)(nil)))
+	overwritten, err := RegisterBean("singletonBean", reflect.TypeFor[*singletonBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
-	overwritten, err = RegisterBean("requestBean", reflect.TypeOf((*requestBean)(nil)))
+	overwritten, err = RegisterBean("requestBean", reflect.TypeFor[*requestBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	err = InitializeContainer()
@@ -69,7 +69,7 @@ func (suite *TestSuite) TestMiddleware() {
 }
 
 func (suite *TestSuite) TestMiddlewareNotInitialized() {
-	overwritten, err := RegisterBean("requestBean", reflect.TypeOf((*requestBean)(nil)))
+	overwritten, err := RegisterBean("requestBean", reflect.TypeFor[*requestBean]())
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
 	middleware := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

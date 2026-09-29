@@ -50,7 +50,7 @@ const (
 type beanNode struct {
 	id                 string
 	scope              Scope
-	instance           interface{}
+	instance           any
 	ctx                context.Context
 	dependencies       []*beanNode
 	provided           bool
@@ -64,16 +64,16 @@ type beanNode struct {
 // bookkeeping needs a lock, and user code is never invoked while it is held.
 type container struct {
 	beans          map[string]reflect.Type
-	factories      map[string]func(context.Context) (interface{}, error)
+	factories      map[string]func(context.Context) (any, error)
 	scopes         map[string]Scope
-	postprocessors map[reflect.Type][]func(interface{}) error
+	postprocessors map[reflect.Type][]func(any) error
 	mu             sync.Mutex
 	singletons     map[string]*beanNode
 	starting       bool
 	created        []*beanNode
 	completed      []*beanNode
-	startupClosed  map[interface{}]bool
-	provided       map[interface{}]bool
+	startupClosed  map[any]bool
+	provided       map[any]bool
 }
 
 // newContainer is called under initializeShutdownLock. Registration is immutable until reset,
@@ -82,7 +82,7 @@ func newContainer() *container {
 	c := &container{
 		beans: beans, factories: beanFactories, scopes: scopes,
 		postprocessors: beanPostprocessors, singletons: make(map[string]*beanNode),
-		starting: true, startupClosed: make(map[interface{}]bool), provided: make(map[interface{}]bool),
+		starting: true, startupClosed: make(map[any]bool), provided: make(map[any]bool),
 	}
 	for _, id := range c.ids(Singleton) {
 		n := &beanNode{id: id, scope: Singleton, ctx: context.Background(), provided: userCreatedInstances[id]}
@@ -113,7 +113,7 @@ type resolution struct {
 	created []*beanNode
 }
 
-func (c *container) resolve(ctx context.Context, id string) (instance interface{}, err error) {
+func (c *container) resolve(ctx context.Context, id string) (instance any, err error) {
 	r := &resolution{}
 	var cancelRequest context.CancelFunc
 	if c.scopes[id] == Request {
@@ -205,7 +205,7 @@ func (c *container) build(ctx context.Context, id string, r *resolution, path ma
 		}
 	}()
 	if n.instance == nil {
-		var value interface{}
+		var value any
 		if factory := c.factories[id]; factory != nil {
 			value, err = factory(ctx)
 			if err != nil {
@@ -222,7 +222,7 @@ func (c *container) build(ctx context.Context, id string, r *resolution, path ma
 		c.mu.Unlock()
 	}
 	if !n.provided && c.factories[id] == nil {
-		err = c.injectDependencies(id, n.instance, func(dependency string) (interface{}, error) {
+		err = c.injectDependencies(id, n.instance, func(dependency string) (any, error) {
 			dep, buildErr := c.build(ctx, dependency, r, path)
 			if buildErr != nil {
 				return nil, buildErr
@@ -410,7 +410,7 @@ func (c *container) closeNodes(nodes []*beanNode, includeSingletons, includeProv
 }
 
 func (c *container) closeOrderedNodes(ordered []*beanNode, includeSingletons, includeProvided bool) {
-	closed := make(map[interface{}]bool)
+	closed := make(map[any]bool)
 	for i := len(ordered) - 1; i >= 0; i-- {
 		n := ordered[i]
 		if value := c.claimCleanup(n, includeSingletons, includeProvided, closed); value != nil {
@@ -420,7 +420,7 @@ func (c *container) closeOrderedNodes(ordered []*beanNode, includeSingletons, in
 }
 
 // Distinct allocations of zero-size Go types may have equal pointers.
-func hasInstanceIdentity(value interface{}) bool {
+func hasInstanceIdentity(value any) bool {
 	return value != nil && reflect.TypeOf(value).Elem().Size() != 0
 }
 
@@ -445,7 +445,7 @@ func (c *container) preserveInstance(n *beanNode, includeSingletons, includeProv
 	return false
 }
 
-func (c *container) claimCleanup(n *beanNode, includeSingletons, includeProvided bool, closed map[interface{}]bool) interface{} {
+func (c *container) claimCleanup(n *beanNode, includeSingletons, includeProvided bool, closed map[any]bool) any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	value := n.instance
@@ -468,7 +468,7 @@ func (c *container) claimCleanup(n *beanNode, includeSingletons, includeProvided
 
 // closeBean releases the bean's resources. Errors and panics from the bean's
 // Close are logged, so one misbehaving bean cannot abort cleanup of the rest.
-func closeBean(id string, instance interface{}) {
+func closeBean(id string, instance any) {
 	if closer, ok := instance.(io.Closer); ok {
 		closed := false
 		defer func() {

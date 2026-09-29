@@ -15,7 +15,7 @@ singleton, prototype, and HTTP request scopes.
 
 ## Install
 
-Requires Go 1.20 or later.
+Requires Go 1.26.4 or later.
 
 ```sh
 go get github.com/goioc/di

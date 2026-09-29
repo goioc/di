@@ -40,12 +40,12 @@ func (b *dependencyFailureConsumer) PostConstruct() error { b.initialized = true
 func TestSharedDependencyFailureStopsBothConsumers(t *testing.T) {
 	defer resetContainer()
 	for _, id := range []string{"a", "b"} {
-		_, err := RegisterBean(id, reflect.TypeOf((*dependencyFailureConsumer)(nil)))
+		_, err := RegisterBean(id, reflect.TypeFor[*dependencyFailureConsumer]())
 		require.NoError(t, err)
 	}
 	failure := errors.New("shared dependency failed")
 	initialized, closed := 0, 0
-	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (any, error) {
 		return &callbackBean{
 			initHook:  func() error { initialized++; return failure },
 			closeHook: func() error { closed++; return nil },
@@ -79,11 +79,11 @@ func (b *mixedCleanupConsumer) Close() error { b.closed++; return nil }
 func TestResolutionCleanupLeavesSingletonDependenciesOpen(t *testing.T) {
 	defer resetContainer()
 	closed := 0
-	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("dependency", Singleton, func(context.Context) (any, error) {
 		return &callbackBean{closeHook: func() error { closed++; return nil }}, nil
 	})
 	require.NoError(t, err)
-	_, err = RegisterBean("consumer", reflect.TypeOf((*mixedCleanupConsumer)(nil)))
+	_, err = RegisterBean("consumer", reflect.TypeFor[*mixedCleanupConsumer]())
 	require.NoError(t, err)
 	c := containerForTest()
 	node, err := c.build(context.Background(), "consumer", &resolution{}, make(map[string]bool))
@@ -105,9 +105,11 @@ func TestInjectorRejectsValueFieldsBeforeResolvingDependencies(t *testing.T) {
 	}{Value: "unchanged"}
 	// Registration also rejects this type. Check the injector's defensive
 	// validation independently, before it can resolve or assign a dependency.
-	c := &container{beans: map[string]reflect.Type{"bean": reflect.TypeOf(instance)}}
+	c := &container{beans: map[string]reflect.Type{"bean": reflect.TypeFor[*struct {
+		Value string "di.inject:\"\""
+	}]()}}
 	resolved := false
-	err := c.injectDependencies("bean", instance, func(string) (interface{}, error) {
+	err := c.injectDependencies("bean", instance, func(string) (any, error) {
 		resolved = true
 		return new(string), nil
 	})
@@ -128,13 +130,13 @@ type parallelCyclePeer struct {
 func TestParallelSingletonFieldCycleDoesNotDeadlock(t *testing.T) {
 	defer resetContainer()
 	started, releaseHook := make(chan struct{}), make(chan struct{})
-	_, err := RegisterBeanFactory("gate", Singleton, func(context.Context) (interface{}, error) {
+	_, err := RegisterBeanFactory("gate", Singleton, func(context.Context) (any, error) {
 		return &callbackBean{initHook: func() error { close(started); <-releaseHook; return nil }}, nil
 	})
 	require.NoError(t, err)
-	_, err = RegisterBean("owner", reflect.TypeOf((*parallelCycleOwner)(nil)))
+	_, err = RegisterBean("owner", reflect.TypeFor[*parallelCycleOwner]())
 	require.NoError(t, err)
-	_, err = RegisterBean("peer", reflect.TypeOf((*parallelCyclePeer)(nil)))
+	_, err = RegisterBean("peer", reflect.TypeFor[*parallelCyclePeer]())
 	require.NoError(t, err)
 	c := containerForTest()
 	// Wire the cycle once, then overlap initialization from its two entry points.
@@ -165,13 +167,13 @@ func TestParallelSingletonFieldCycleDoesNotDeadlock(t *testing.T) {
 func TestConsumerOutsideCycleWaitsForCycleInitialization(t *testing.T) {
 	defer resetContainer()
 	started, releaseHook := make(chan struct{}), make(chan struct{})
-	_, err := RegisterBean("a", reflect.TypeOf((*singletonCycleA)(nil)))
+	_, err := RegisterBean("a", reflect.TypeFor[*singletonCycleA]())
 	require.NoError(t, err)
-	_, err = RegisterBean("b", reflect.TypeOf((*singletonCycleB)(nil)))
+	_, err = RegisterBean("b", reflect.TypeFor[*singletonCycleB]())
 	require.NoError(t, err)
-	_, err = RegisterBean("consumer", reflect.TypeOf((*cycleConsumer)(nil)))
+	_, err = RegisterBean("consumer", reflect.TypeFor[*cycleConsumer]())
 	require.NoError(t, err)
-	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleA)(nil)), func(interface{}) error {
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeFor[*singletonCycleA](), func(any) error {
 		close(started)
 		<-releaseHook
 		return nil
