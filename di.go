@@ -298,11 +298,10 @@ func getScope(bean reflect.Type) (*Scope, error) {
 
 func (c *container) injectDependencies(beanID string, instance interface{}, resolve func(string) (interface{}, error)) error {
 	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
-	instanceType := c.beans[beanID]
-	instanceElement := instanceType.Elem()
+	instanceElement := c.beans[beanID].Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
-		beanToInject, ok := field.Tag.Lookup(string(inject))
+		dependency, ok := field.Tag.Lookup(string(inject))
 		if !ok {
 			continue
 		}
@@ -310,98 +309,95 @@ func (c *container) injectDependencies(beanID string, instance interface{}, reso
 		if err != nil {
 			return err
 		}
-		fieldToInject := reflect.ValueOf(instance).Elem().Field(i)
-		fieldToInject = reflect.NewAt(fieldToInject.Type(), unsafe.Pointer(fieldToInject.UnsafeAddr())).Elem()
-		switch fieldToInject.Kind() {
+		target := reflect.ValueOf(instance).Elem().Field(i)
+		target = reflect.NewAt(target.Type(), unsafe.Pointer(target.UnsafeAddr())).Elem()
+		switch target.Kind() {
 		case reflect.Ptr, reflect.Interface:
-			if beanToInject == "" { // injecting by type, gotta find the candidate first
-				candidates := c.findInjectionCandidates(fieldToInject.Type())
-				if len(candidates) < 1 {
-					if optionalDependency {
-						continue
-					}
-					return errors.New("no candidates found for the injection")
-				}
-				if len(candidates) > 1 {
-					return errors.New("more then one candidate found for the injection")
-				}
-				beanToInject = candidates[0]
-			}
-			beanToInjectType := c.beans[beanToInject]
-			logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-			beanScope, beanFound := c.scopes[beanToInject]
-			if !beanFound {
-				if optionalDependency {
-					logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
-					continue
-				}
-				return errors.New("no dependency found")
-			}
-			if beanScope == Request {
-				return errors.New(requestScopedBeansCantBeInjected)
-			}
-			instanceToInject, err := resolve(beanToInject)
-			if err != nil {
-				return err
-			}
-			valueToInject := reflect.ValueOf(instanceToInject)
-			if !valueToInject.Type().AssignableTo(fieldToInject.Type()) {
-				return errors.New("bean is not assignable to dependency field")
-			}
-			fieldToInject.Set(valueToInject)
-		case reflect.Slice:
-			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
-				return errors.New(unsupportedDependencyType)
-			}
-			candidates := c.findInjectionCandidates(fieldToInject.Type().Elem())
-			if len(candidates) < 1 {
-				if !optionalDependency {
-					fieldToInject.Set(reflect.MakeSlice(fieldToInject.Type(), 0, 0))
-				}
-				continue
-			}
-			fieldToInject.Set(reflect.MakeSlice(fieldToInject.Type(), len(candidates), len(candidates)))
-			for i, beanToInject := range candidates {
-				beanToInjectType := c.beans[beanToInject]
-				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-				if c.scopes[beanToInject] == Request {
-					return errors.New(requestScopedBeansCantBeInjected)
-				}
-				instanceToInject, err := resolve(beanToInject)
-				if err != nil {
-					return err
-				}
-				fieldToInject.Index(i).Set(reflect.ValueOf(instanceToInject))
-			}
-		case reflect.Map:
-			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
-				return errors.New(unsupportedDependencyType)
-			}
-			candidates := c.findInjectionCandidates(fieldToInject.Type().Elem())
-			if len(candidates) < 1 {
-				if !optionalDependency {
-					fieldToInject.Set(reflect.MakeMap(fieldToInject.Type()))
-				}
-				continue
-			}
-			fieldToInject.Set(reflect.MakeMap(fieldToInject.Type()))
-			for _, beanToInject := range candidates {
-				beanToInjectType := c.beans[beanToInject]
-				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-				if c.scopes[beanToInject] == Request {
-					return errors.New(requestScopedBeansCantBeInjected)
-				}
-				instanceToInject, err := resolve(beanToInject)
-				if err != nil {
-					return err
-				}
-				fieldToInject.SetMapIndex(reflect.ValueOf(beanToInject).Convert(fieldToInject.Type().Key()), reflect.ValueOf(instanceToInject))
-			}
+			err = c.injectField(beanID, dependency, target, optionalDependency, resolve)
+		case reflect.Slice, reflect.Map:
+			err = c.injectCollection(beanID, target, optionalDependency, resolve)
 		default:
-			return errors.New(unsupportedDependencyType)
+			err = errors.New(unsupportedDependencyType)
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (c *container) injectField(beanID, dependency string, target reflect.Value, optionalDependency bool, resolve func(string) (interface{}, error)) error {
+	if dependency == "" {
+		candidates := c.findInjectionCandidates(target.Type())
+		if len(candidates) == 0 {
+			if optionalDependency {
+				return nil
+			}
+			return errors.New("no candidates found for the injection")
+		}
+		if len(candidates) > 1 {
+			return errors.New("more then one candidate found for the injection")
+		}
+		dependency = candidates[0]
+	}
+	value, err := c.dependencyValue(beanID, dependency, optionalDependency, resolve)
+	if err != nil || !value.IsValid() {
+		return err
+	}
+	if !value.Type().AssignableTo(target.Type()) {
+		return errors.New("bean is not assignable to dependency field")
+	}
+	target.Set(value)
+	return nil
+}
+
+func (c *container) injectCollection(beanID string, target reflect.Value, optionalDependency bool, resolve func(string) (interface{}, error)) error {
+	elementType := target.Type().Elem()
+	if elementType.Kind() != reflect.Ptr && elementType.Kind() != reflect.Interface {
+		return errors.New(unsupportedDependencyType)
+	}
+	candidates := c.findInjectionCandidates(elementType)
+	if len(candidates) == 0 && optionalDependency {
+		return nil
+	}
+	isMap := target.Kind() == reflect.Map
+	if isMap {
+		target.Set(reflect.MakeMap(target.Type()))
+	} else {
+		target.Set(reflect.MakeSlice(target.Type(), len(candidates), len(candidates)))
+	}
+	for i, dependency := range candidates {
+		value, err := c.dependencyValue(beanID, dependency, false, resolve)
+		if err != nil {
+			return err
+		}
+		if isMap {
+			key := reflect.ValueOf(dependency).Convert(target.Type().Key())
+			target.SetMapIndex(key, value)
+		} else {
+			target.Index(i).Set(value)
+		}
+	}
+	return nil
+}
+
+func (c *container) dependencyValue(beanID, dependency string, optionalDependency bool, resolve func(string) (interface{}, error)) (reflect.Value, error) {
+	beanScope, found := c.scopes[dependency]
+	if !found {
+		if optionalDependency {
+			return reflect.Value{}, nil
+		}
+		return reflect.Value{}, errors.New("no dependency found")
+	}
+	if beanScope == Request {
+		return reflect.Value{}, errors.New(requestScopedBeansCantBeInjected)
+	}
+	logInjection(beanID, c.beans[beanID].Elem(), dependency, c.beans[dependency])
+	instance, err := resolve(dependency)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	return reflect.ValueOf(instance), nil
 }
 
 func logInjection(beanID string, instanceElement reflect.Type, beanToInject string, beanToInjectType reflect.Type) {

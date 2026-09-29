@@ -145,36 +145,36 @@ func (c *container) resolve(ctx context.Context, id string) (instance interface{
 	return n.instance, nil
 }
 
-func (c *container) build(ctx context.Context, id string, r *resolution, path map[string]bool) (n *beanNode, err error) {
+func (c *container) constructionNode(ctx context.Context, id string, r *resolution, path map[string]bool) (n *beanNode, existing bool, err error) {
 	scope, found := c.scopes[id]
 	if !found {
-		return nil, errors.New("bean is not registered: " + id)
+		return nil, false, errors.New("bean is not registered: " + id)
 	}
 	c.mu.Lock()
 	if scope == Singleton {
 		n = c.singletons[id]
 		if n.state == failed {
 			c.mu.Unlock()
-			return nil, n.err
+			return nil, false, n.err
 		}
 		if n.state >= wired {
 			c.mu.Unlock()
-			return n, nil
+			return n, true, nil
 		}
 		if n.state == wiring {
 			instance := n.instance
 			c.mu.Unlock()
 			if path[id] && instance != nil {
 				// Preallocated singleton references permit field-injection cycles.
-				return n, nil
+				return n, true, nil
 			}
-			return nil, errors.New("bean construction is already in progress: " + id)
+			return nil, false, errors.New("bean construction is already in progress: " + id)
 		}
 		n.state = wiring
 	} else {
 		if path[id] {
 			c.mu.Unlock()
-			return nil, errors.New("circular dependency detected for bean: " + id)
+			return nil, false, errors.New("circular dependency detected for bean: " + id)
 		}
 		n = &beanNode{id: id, scope: scope, ctx: ctx, state: wiring}
 		r.created = append(r.created, n)
@@ -183,6 +183,14 @@ func (c *container) build(ctx context.Context, id string, r *resolution, path ma
 		}
 	}
 	c.mu.Unlock()
+	return n, false, nil
+}
+
+func (c *container) build(ctx context.Context, id string, r *resolution, path map[string]bool) (n *beanNode, err error) {
+	n, existing, err := c.constructionNode(ctx, id, r, path)
+	if err != nil || existing {
+		return n, err
+	}
 	path[id] = true
 	defer delete(path, id)
 	defer func() {
@@ -302,7 +310,8 @@ func (c *container) closeSingletons() {
 	c.closeNodes(nodes, true, true)
 }
 
-func (c *container) closeNodes(nodes []*beanNode, includeSingletons, includeProvided bool) {
+// dependencyOrder visits dependencies before their owners and tolerates singleton cycles.
+func dependencyOrder(nodes []*beanNode) []*beanNode {
 	allowed := make(map[*beanNode]bool)
 	for _, n := range nodes {
 		allowed[n] = true
@@ -323,34 +332,63 @@ func (c *container) closeNodes(nodes []*beanNode, includeSingletons, includeProv
 	for _, n := range nodes {
 		visit(n)
 	}
+	return ordered
+}
+
+func (c *container) closeNodes(nodes []*beanNode, includeSingletons, includeProvided bool) {
+	ordered := dependencyOrder(nodes)
 	closed := make(map[interface{}]bool)
 	for i := len(ordered) - 1; i >= 0; i-- {
 		n := ordered[i]
-		c.mu.Lock()
-		value := n.instance
-		// Distinct allocations of zero-size Go types may have equal pointers.
-		// Only use pointer identity to deduplicate non-zero-size instances.
-		hasIdentity := value != nil && reflect.TypeOf(value).Elem().Size() != 0
-		protected := !includeProvided && (n.provided || hasIdentity && c.provided[value])
-		if !includeSingletons {
-			for _, singleton := range c.singletons {
-				if hasIdentity && singleton.instance == value {
-					protected = true
-				}
+		if value := c.claimCleanup(n, includeSingletons, includeProvided, closed); value != nil {
+			closeBean(n.id, value)
+		}
+	}
+}
+
+// Distinct allocations of zero-size Go types may have equal pointers.
+func hasInstanceIdentity(value interface{}) bool {
+	return value != nil && reflect.TypeOf(value).Elem().Size() != 0
+}
+
+// Called with c.mu held. A failed resolution must not dispose of an existing singleton.
+func (c *container) preserveInstance(n *beanNode, includeSingletons, includeProvided bool) bool {
+	if !includeProvided && (n.provided || hasInstanceIdentity(n.instance) && c.provided[n.instance]) {
+		return true
+	}
+	if includeSingletons {
+		return false
+	}
+	if n.scope == Singleton {
+		return true
+	}
+	if hasInstanceIdentity(n.instance) {
+		for _, singleton := range c.singletons {
+			if singleton.instance == n.instance {
+				return true
 			}
 		}
-		if value == nil || n.closed || hasIdentity && (closed[value] || c.startupClosed[value]) || protected || n.scope == Singleton && !includeSingletons {
-			c.mu.Unlock()
-			continue
-		}
-		n.closed = true
-		closed[value] = hasIdentity
-		if c.starting && hasIdentity {
-			c.startupClosed[value] = true
-		}
-		c.mu.Unlock()
-		closeBean(n.id, value)
 	}
+	return false
+}
+
+func (c *container) claimCleanup(n *beanNode, includeSingletons, includeProvided bool, closed map[interface{}]bool) interface{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	value := n.instance
+	if value == nil || n.closed || c.preserveInstance(n, includeSingletons, includeProvided) {
+		return nil
+	}
+	hasIdentity := hasInstanceIdentity(value)
+	if hasIdentity && (closed[value] || c.startupClosed[value]) {
+		return nil
+	}
+	n.closed = true
+	closed[value] = hasIdentity
+	if c.starting && hasIdentity {
+		c.startupClosed[value] = true
+	}
+	return value
 }
 
 func closeBean(id string, instance interface{}) {
