@@ -130,6 +130,12 @@ func (suite *TestSuite) TestRegisterNonReferenceBean() {
 	}
 }
 
+func (suite *TestSuite) TestRegisterNilBeanType() {
+	overwritten, err := RegisterBean("nil", nil)
+	assert.False(suite.T(), overwritten)
+	assert.EqualError(suite.T(), err, "bean type must be a pointer")
+}
+
 func (suite *TestSuite) TestRegisterNonReferenceBeanInstance() {
 	expectedError := errors.New("bean instance must be a pointer")
 	overwritten, err := RegisterBeanInstance("", "")
@@ -137,6 +143,19 @@ func (suite *TestSuite) TestRegisterNonReferenceBeanInstance() {
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
+}
+
+func (suite *TestSuite) TestRegisterNilBeanInstance() {
+	overwritten, err := RegisterBeanInstance("nil", nil)
+	assert.False(suite.T(), overwritten)
+	assert.EqualError(suite.T(), err, "bean instance must be a pointer")
+}
+
+func (suite *TestSuite) TestRegisterTypedNilBeanInstance() {
+	var instance *string
+	overwritten, err := RegisterBeanInstance("nil", instance)
+	assert.False(suite.T(), overwritten)
+	assert.EqualError(suite.T(), err, "bean instance must be a pointer")
 }
 
 func (suite *TestSuite) TestRegisterNonReferenceSingletonBeanFactory() {
@@ -150,6 +169,37 @@ func (suite *TestSuite) TestRegisterNonReferenceSingletonBeanFactory() {
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
+}
+
+func (suite *TestSuite) TestRegisterBeanFactoryWithUnsupportedScope() {
+	overwritten, err := RegisterBeanFactory("bean", Scope("invalid"), func(context.Context) (interface{}, error) {
+		return new(string), nil
+	})
+	assert.False(suite.T(), overwritten)
+	assert.EqualError(suite.T(), err, "unsupported scope: invalid")
+}
+
+func (suite *TestSuite) TestRegisterNilBeanFactory() {
+	overwritten, err := RegisterBeanFactory("bean", Singleton, nil)
+	assert.False(suite.T(), overwritten)
+	assert.EqualError(suite.T(), err, "bean factory must not be nil")
+}
+
+func (suite *TestSuite) TestRegisterBeanFactoryReturningNil() {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+		return nil, nil
+	})
+	assert.NoError(suite.T(), err)
+	assert.EqualError(suite.T(), InitializeContainer(), "bean factory must return a non-nil pointer")
+}
+
+func (suite *TestSuite) TestRegisterBeanFactoryReturningTypedNil() {
+	_, err := RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+		var instance *string
+		return instance, nil
+	})
+	assert.NoError(suite.T(), err)
+	assert.EqualError(suite.T(), InitializeContainer(), "bean factory must return a non-nil pointer")
 }
 
 func (suite *TestSuite) TestRegisterNonReferencePrototypeBeanFactory() {
@@ -486,7 +536,9 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromBeanToBeanFact
 	overwritten, err := RegisterBean("bean", reflect.TypeOf((*SingletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
+	factoryCalls := 0
 	overwritten, err = RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) {
+		factoryCalls++
 		s := "test_overwritten"
 		return &s, nil
 	})
@@ -497,6 +549,8 @@ func (suite *TestSuite) TestRegisterBeanFactoryWithOverwritingFromBeanToBeanFact
 	instance, err := GetInstanceSafe("bean")
 	assert.NotNil(suite.T(), instance)
 	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), 1, factoryCalls)
+	assert.NotContains(suite.T(), GetBeanTypes(), "bean")
 	assert.Equal(suite.T(), "test_overwritten", *instance.(*string))
 }
 
@@ -559,6 +613,30 @@ func (suite *TestSuite) TestSingletonPostConstructReturnsError() {
 	if assert.Error(suite.T(), err) {
 		assert.Equal(suite.T(), expectedError, err)
 	}
+}
+
+func (suite *TestSuite) TestFailedInitializationCanBeRetried() {
+	overwritten, err := RegisterBeanInstance("bean", new(string))
+	assert.False(suite.T(), overwritten)
+	assert.NoError(suite.T(), err)
+	postprocessCalls := 0
+	err = RegisterBeanPostprocessor(reflect.TypeOf((*string)(nil)), func(interface{}) error {
+		postprocessCalls++
+		if postprocessCalls == 1 {
+			return errors.New("temporary initialization failure")
+		}
+		return nil
+	})
+	assert.NoError(suite.T(), err)
+	assert.EqualError(suite.T(), InitializeContainer(), "temporary initialization failure")
+	instance, err := GetInstanceSafe("bean")
+	assert.Nil(suite.T(), instance)
+	assert.EqualError(suite.T(), err, "container is not initialized: can't lookup instances of beans yet")
+	assert.NoError(suite.T(), InitializeContainer())
+	instance, err = GetInstanceSafe("bean")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance)
+	assert.Equal(suite.T(), 2, postprocessCalls)
 }
 
 type failingPrototypeBean struct {
@@ -696,6 +774,50 @@ func (suite *TestSuite) TestDirectCircularDependency() {
 	}
 }
 
+func (suite *TestSuite) TestSharedPrototypeDependencyIsNotCircular() {
+	type Leaf struct {
+		Scope Scope `di.scope:"prototype"`
+	}
+	type Child struct {
+		Scope Scope `di.scope:"prototype"`
+		Leaf  *Leaf `di.inject:"leaf"`
+	}
+	type Root struct {
+		Child *Child `di.inject:"child"`
+		Leaf  *Leaf  `di.inject:"leaf"`
+	}
+	_, err := RegisterBean("root", reflect.TypeOf((*Root)(nil)))
+	assert.NoError(suite.T(), err)
+	_, err = RegisterBean("child", reflect.TypeOf((*Child)(nil)))
+	assert.NoError(suite.T(), err)
+	_, err = RegisterBean("leaf", reflect.TypeOf((*Leaf)(nil)))
+	assert.NoError(suite.T(), err)
+	assert.NoError(suite.T(), InitializeContainer())
+	root := GetInstance("root").(*Root)
+	assert.NotNil(suite.T(), root.Child.Leaf)
+	assert.NotNil(suite.T(), root.Leaf)
+	assert.NotSame(suite.T(), root.Child.Leaf, root.Leaf)
+}
+
+func (suite *TestSuite) TestFactoryCanLookupPrototypeBean() {
+	type PrototypeBean struct {
+		Scope Scope `di.scope:"prototype"`
+	}
+	_, err := RegisterBean("prototype", reflect.TypeOf((*PrototypeBean)(nil)))
+	assert.NoError(suite.T(), err)
+	_, err = RegisterBeanFactory("factory", Prototype, func(context.Context) (interface{}, error) {
+		if _, err := GetInstanceSafe("prototype"); err != nil {
+			return nil, err
+		}
+		return new(string), nil
+	})
+	assert.NoError(suite.T(), err)
+	assert.NoError(suite.T(), InitializeContainer())
+	instance, err := GetInstanceSafe("factory")
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), instance)
+}
+
 func (suite *TestSuite) TestInjectByTypeNoCandidatesMandatory() {
 	type OtherBean struct {
 	}
@@ -811,6 +933,28 @@ func (suite *TestSuite) TestInjectByIDWithInterface() {
 	instance, err := GetInstanceSafe("singletonBean")
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), instance.(*SingletonBean).otherBean)
+}
+
+func (suite *TestSuite) TestInjectByIDWithIncompatibleTypeReturnsError() {
+	type Expected struct{}
+	type Actual struct{}
+	type Holder struct {
+		Value *Expected `di.inject:"actual"`
+	}
+	_, err := RegisterBean("holder", reflect.TypeOf((*Holder)(nil)))
+	assert.NoError(suite.T(), err)
+	_, err = RegisterBean("actual", reflect.TypeOf((*Actual)(nil)))
+	assert.NoError(suite.T(), err)
+	assert.EqualError(suite.T(), InitializeContainer(), "bean is not assignable to dependency field")
+}
+
+func (suite *TestSuite) TestMapInjectionRejectsNonStringKey() {
+	type Dependency struct{}
+	type Holder struct {
+		Values map[int]*Dependency `di.inject:""`
+	}
+	_, err := RegisterBean("holder", reflect.TypeOf((*Holder)(nil)))
+	assert.EqualError(suite.T(), err, unsupportedDependencyType)
 }
 
 func (suite *TestSuite) TestInjectToSliceWithTypeNoCandidatesNotOptional() {
