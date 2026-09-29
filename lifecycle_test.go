@@ -1,0 +1,163 @@
+/*
+ * Copyright (c) 2024 Go IoC
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ */
+
+package di
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"testing"
+)
+
+type lifecycleContextBean struct{ ctx context.Context }
+
+func (b *lifecycleContextBean) SetContext(ctx context.Context) { b.ctx = ctx }
+func (b *lifecycleContextBean) PostConstruct() error {
+	if b.ctx == nil {
+		return errors.New("PostConstruct called before SetContext")
+	}
+	return nil
+}
+func TestContextBeforeInit(t *testing.T) {
+	for _, scope := range []Scope{Singleton, Prototype, Request} {
+		t.Run(string(scope), func(t *testing.T) {
+			defer resetContainer()
+			_, _ = RegisterBeanFactory("bean", scope, func(context.Context) (interface{}, error) { return &lifecycleContextBean{}, nil })
+			err := InitializeContainer()
+			if err == nil && scope == Prototype {
+				_, err = GetInstanceSafe("bean")
+			} else if err == nil && scope == Request {
+				getRequestBeanInstance(context.Background(), "bean")
+			}
+			if err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+type lifecycleLookupPrototype struct {
+	Scope Scope `di.scope:"prototype"`
+}
+
+func (*lifecycleLookupPrototype) PostConstruct() error { _, err := GetInstanceSafe("dep"); return err }
+
+type lifecycleLookupRoot struct {
+	Child *lifecycleLookupPrototype `di.inject:"child"`
+}
+
+func TestPrototypeStartupLookup(t *testing.T) {
+	defer resetContainer()
+	_, _ = RegisterBeanInstance("dep", new(string))
+	_, _ = RegisterBean("child", reflect.TypeOf((*lifecycleLookupPrototype)(nil)))
+	_, _ = RegisterBean("root", reflect.TypeOf((*lifecycleLookupRoot)(nil)))
+	if err := InitializeContainer(); err != nil {
+		t.Errorf("injected prototype cannot perform documented PostConstruct lookup: %v", err)
+	}
+}
+
+type lifecycleInitializedDependency struct{ Ready bool }
+
+func (b *lifecycleInitializedDependency) PostConstruct() error { b.Ready = true; return nil }
+
+type lifecycleInitializationConsumer struct {
+	Dependency *lifecycleInitializedDependency `di.inject:"dependency"`
+}
+
+func (b *lifecycleInitializationConsumer) PostConstruct() error {
+	if !b.Dependency.Ready {
+		return errors.New("dependency has not been initialized")
+	}
+	return nil
+}
+func TestDependencyInitializationOrder(t *testing.T) {
+	defer resetContainer()
+	failures := 0
+	for i := 0; i < 100; i++ {
+		resetContainer()
+		_, _ = RegisterBean("consumer", reflect.TypeOf((*lifecycleInitializationConsumer)(nil)))
+		_, _ = RegisterBean("dependency", reflect.TypeOf((*lifecycleInitializedDependency)(nil)))
+		if err := InitializeContainer(); err != nil {
+			failures++
+		}
+	}
+	if failures > 0 {
+		t.Errorf("%d/100 initializations ran consumer before its dependency's PostConstruct", failures)
+	}
+}
+
+type lifecycleResource struct {
+	fail   bool
+	closed bool
+}
+
+func (b *lifecycleResource) PostConstruct() error {
+	if b.fail {
+		return errors.New("initialization failed")
+	}
+	return nil
+}
+func (b *lifecycleResource) Close() error { b.closed = true; return nil }
+func TestRetryResourceLeak(t *testing.T) {
+	defer resetContainer()
+	var resources []*lifecycleResource
+	_, _ = RegisterBeanFactory("resource", Singleton, func(context.Context) (interface{}, error) {
+		b := &lifecycleResource{fail: len(resources) == 0}
+		resources = append(resources, b)
+		return b, nil
+	})
+	if InitializeContainer() == nil {
+		t.Fatal("expected first initialization to fail")
+	}
+	if err := InitializeContainer(); err != nil {
+		t.Fatal(err)
+	}
+	Close()
+	if len(resources) != 2 {
+		t.Fatalf("expected two resources, got %d", len(resources))
+	}
+	if !resources[0].closed {
+		t.Error("retry overwrote the failed resource without ever calling Close")
+	}
+}
+func TestFailedRequestCleanup(t *testing.T) {
+	defer resetContainer()
+	b := &lifecycleResource{fail: true}
+	_, _ = RegisterBeanFactory("resource", Request, func(context.Context) (interface{}, error) { return b, nil })
+	if err := InitializeContainer(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	func() {
+		defer func() { _ = recover() }()
+		Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil).WithContext(ctx))
+	}()
+	cancel()
+	// A failed bean never reaches middleware's close-goroutine registration.
+	if !b.closed {
+		t.Error("failed request bean was discarded without Close")
+	}
+}
+
+func TestSingletonFactoryLookup(t *testing.T) {
+	defer resetContainer()
+	_, _ = RegisterBeanInstance("dep", new(string))
+	_, _ = RegisterBeanFactory("bean", Singleton, func(context.Context) (interface{}, error) { return GetInstanceSafe("dep") })
+	if err := InitializeContainer(); err != nil {
+		t.Errorf("singleton factory cannot lookup registered instance: %v", err)
+	}
+}

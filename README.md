@@ -123,7 +123,7 @@ The main component of the library is the [Inversion of Control Container](https:
 
 For the container to become aware of the beans, one must register them manually (unlike Java, unfortunately, we can't scan classpath to do it automatically, because Go runtime doesn't contain high-level information about types). How can one register beans in the container?
 
-- **By type**. This is described in the example above. A structure is declared with a field tagged with `di.scope:"<scope>"`. This field can be even omitted - in this case, the default scope will be `Singleton`. Then the registration is done like this:
+- **By type**. Pass a pointer-to-struct type. Other pointer types, such as `*string`, can be registered using an instance or factory instead. A structure is declared with a field tagged with `di.scope:"<scope>"`. This field can be even omitted - in this case, the default scope will be `Singleton`. Then the registration is done like this:
 ```go
 di.RegisterBean("beanID", reflect.TypeOf((*YourAwesomeStructure)(nil)))
 ```
@@ -137,7 +137,8 @@ For this type of beans, the only supported scope is `Singleton`, because I don't
 - **Via bean factory**. If you have a method that is producing instances for you, you can register it as a bean factory:
 ```go
 di.RegisterBeanFactory("beanID", Singleton, func(context.Context) (interface{}, error) {
-		return "My awesome string that is going to become a bean!", nil
+		value := "My awesome string that is going to become a bean!"
+		return &value, nil
 	})
 ```
 Feel free to use any scope with this method. By the way, you can even lookup other beans within the factory:
@@ -150,7 +151,7 @@ Note that factory-method accepts `context.Context`. It can be useful for request
 
 ### Beans initialization
 
-There's a special interface `InitializingBean` that can be implemented to provide your bean with some initialization logic that will be executed after the container is initialized (for `Singleton` beans) or after the `Prototype`/`Request` instance is created. Again, you can also lookup other beans during initialization (since the container is ready by that time):
+Implement `InitializingBean` to run initialization logic after a bean's dependencies have been injected. The container initializes dependencies before their consumers, calls `SetContext` before `PostConstruct`, and runs postprocessors last. Factories and initialization hooks can look up other beans, including during singleton startup and when a prototype is injected into a singleton:
 
 ```go
 type PostConstructBean1 struct {
@@ -176,6 +177,14 @@ func (pcb *PostConstructBean2) PostConstruct() error {
 	return nil
 }
 ```
+
+Wait for `InitializeContainer()` to succeed before starting application work or serving requests. Registration is frozen while initialization, rollback, or shutdown is in progress. Singleton hooks can retrieve their own instance, but must not assume another member of an initialization cycle has finished its hook. A lookup that re-enters a singleton's unfinished construction returns an error.
+
+If startup fails, the container closes beans it created during that attempt and keeps the registrations so initialization can be retried. Pre-created instances registered with `RegisterBeanInstance` are retained; their initialization callbacks can run again on retry. A failed prototype or request resolution also closes the new beans created for that dependency graph. Cleanup errors are logged without replacing the initialization error.
+
+Successful prototypes remain the caller's responsibility to close. Successful request beans are closed on request cancellation or when the wrapped handler returns. Call `di.Close()` to release singletons after stopping application work. It rejects new lookups, waits for active lookups to finish, and closes singletons in reverse initialization order. Already-returned beans can outlive a lookup, so draining handlers and background workers remains the application's responsibility.
+
+Do not call `Close()` from a factory, initialization hook, context setter, or postprocessor, or wait for shutdown inside one: synchronous shutdown would be waiting for that callback to finish. These callbacks, and bean closers, can safely inspect registrations using `GetBeanTypes()` and `GetBeanScopes()`.
 
 ### Beans post-processors
 
@@ -274,6 +283,8 @@ type CircularBean struct {
 ```
 
 Trying to use such bean will result in the `circular dependency detected for bean: circularBean` error. There's no problem as such with referencing a bean from itself - if it's a `Singleton` bean. But doing it with `Prototype`/`Request` beans will lead to infinite creation of the instances. So, be careful with this: "with great power comes great responsibility" 🕸 
+
+Singleton field-injection cycles remain supported: all references in the cycle are wired before hooks run. Members of a cycle cannot rely on another member's hook having completed. Independent beans and injection candidates are visited in sorted bean-ID order to make initialization reproducible. Cycle detection follows `di.inject` dependencies; cycles formed by manual lookups inside factories or hooks are not detected and must be avoided.
 
 ## What about middleware?
 

@@ -24,26 +24,27 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var closed = make(chan struct{})
-
 type singletonBean struct {
 }
 
 type requestBean struct {
-	Scope Scope `di.scope:"request"`
-	ctx   context.Context
+	Scope  Scope `di.scope:"request"`
+	ctx    context.Context
+	closed chan struct{}
 }
 
 func (rb *requestBean) SetContext(ctx context.Context) {
 	rb.ctx = ctx
+	rb.closed = make(chan struct{})
 }
 
-func (*requestBean) Close() error {
-	close(closed)
+func (rb *requestBean) Close() error {
+	close(rb.closed)
 	return nil
 }
 
 func (suite *TestSuite) TestMiddleware() {
+	created := make(chan *requestBean, 1)
 	overwritten, err := RegisterBean("singletonBean", reflect.TypeOf((*singletonBean)(nil)))
 	assert.False(suite.T(), overwritten)
 	assert.NoError(suite.T(), err)
@@ -60,6 +61,7 @@ func (suite *TestSuite) TestMiddleware() {
 		assert.True(suite.T(), ok)
 		assert.NotNil(suite.T(), requestBeanInstance)
 		assert.NotEqual(suite.T(), context.Background(), requestBeanInstance.ctx)
+		created <- requestBeanInstance
 	}))
 	server := httptest.NewServer(middleware)
 	defer server.Close()
@@ -69,7 +71,12 @@ func (suite *TestSuite) TestMiddleware() {
 		assert.NoError(suite.T(), resp.Body.Close())
 	}
 	select {
-	case <-closed:
+	case bean := <-created:
+		select {
+		case <-bean.closed:
+		case <-time.After(time.Second):
+			assert.Fail(suite.T(), "request bean was not closed")
+		}
 	case <-time.After(time.Second):
 		assert.Fail(suite.T(), "request bean was not closed")
 	}

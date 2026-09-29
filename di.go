@@ -17,11 +17,10 @@ package di
 import (
 	"context"
 	"errors"
-	"io"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/sirupsen/logrus"
@@ -57,7 +56,10 @@ const (
 )
 
 var initializeShutdownLock sync.Mutex
-var containerInitialized int32
+var containerState lifecycleState
+var runningContainer *container
+var activeLookups int
+var lifecycleChanged = sync.NewCond(&initializeShutdownLock)
 var beans = make(map[string]reflect.Type)
 var beanFactories = make(map[string]func(context.Context) (interface{}, error))
 var scopes = make(map[string]Scope)
@@ -65,9 +67,9 @@ var singletonInstances = make(map[string]interface{})
 var userCreatedInstances = make(map[string]bool)
 var beanPostprocessors = make(map[reflect.Type][]func(bean interface{}) error)
 
-// InitializingBean is an interface marking beans that need to be additionally initialized after the container is ready.
+// InitializingBean marks beans that need initialization after dependency injection.
 type InitializingBean interface {
-	// PostConstruct method will be called on a bean after the container is initialized.
+	// PostConstruct is called after SetContext and dependency initialization.
 	PostConstruct() error
 }
 
@@ -87,50 +89,84 @@ func init() {
 func RegisterBeanPostprocessor(beanType reflect.Type, postprocessor func(bean interface{}) error) error {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
-	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
+	if containerState != uninitialized {
 		return errors.New("container is already initialized: can't register bean postprocessor")
+	}
+	if beanType == nil {
+		return errors.New("bean postprocessor type must not be nil")
+	}
+	if postprocessor == nil {
+		return errors.New("bean postprocessor must not be nil")
 	}
 	beanPostprocessors[beanType] = append(beanPostprocessors[beanType], postprocessor)
 	return nil
 }
 
-// InitializeContainer function initializes the IoC container.
-func InitializeContainer() error {
+// InitializeContainer creates and initializes the registered singletons. Registration is
+// frozen until Close. Factories and hooks may look up other beans during startup;
+// applications must wait for InitializeContainer to return before serving requests.
+func InitializeContainer() (err error) {
 	initializeShutdownLock.Lock()
-	defer initializeShutdownLock.Unlock()
-	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
+	if containerState != uninitialized {
+		initializeShutdownLock.Unlock()
 		return errors.New("container is already initialized: reinitialization is not supported")
 	}
-	err := createSingletonInstances()
-	if err != nil {
-		return err
+	c := newContainer()
+	runningContainer = c
+	containerState = initializing
+	initializeShutdownLock.Unlock()
+
+	succeeded := false
+	defer func() {
+		defer func() {
+			initializeShutdownLock.Lock()
+			if succeeded {
+				containerState = initialized
+			} else {
+				runningContainer = nil
+				containerState = uninitialized
+			}
+			lifecycleChanged.Broadcast()
+			initializeShutdownLock.Unlock()
+		}()
+		if !succeeded {
+			// Stop admitting lookups before rolling back this attempt. Callbacks
+			// already resolving a bean retain the same container snapshot.
+			initializeShutdownLock.Lock()
+			containerState = rollingBack
+			for activeLookups != 0 {
+				lifecycleChanged.Wait()
+			}
+			initializeShutdownLock.Unlock()
+			c.rollback()
+		}
+	}()
+	for _, beanID := range c.ids(Singleton) {
+		if _, err = c.resolve(context.Background(), beanID); err != nil {
+			return err
+		}
 	}
-	err = injectSingletonDependencies()
-	if err != nil {
-		return err
-	}
-	atomic.StoreInt32(&containerInitialized, 1)
-	err = initializeSingletonInstances()
-	if err != nil {
-		atomic.StoreInt32(&containerInitialized, 0)
-		return err
-	}
+	c.finishInitialization()
+	succeeded = true
 	return nil
 }
 
 // RegisterBean function registers bean by type, the scope of the bean should be defined in the corresponding struct
-// using a tag `di.scope` (`Singleton` is used if no scope is explicitly specified). `beanType` should be a reference
+// using a tag `di.scope` (`Singleton` is used if no scope is explicitly specified). `beanType` must be a pointer to a struct
 // type, e.g.: `reflect.TypeOf((*services.YourService)(nil))`. Return value of `overwritten` is set to `true` if the
 // bean with the same `beanID` has been registered already.
 func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
-	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
+	if containerState != uninitialized {
 		return false, errors.New("container is already initialized: can't register new bean")
 	}
 	overwritten = isBeanRegistered(beanID)
 	if beanType == nil || beanType.Kind() != reflect.Ptr {
 		return false, errors.New("bean type must be a pointer")
+	}
+	if beanType.Elem().Kind() != reflect.Struct {
+		return false, errors.New("bean type must be a pointer to a struct")
 	}
 	var existingBeanType reflect.Type
 	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
@@ -170,7 +206,7 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
-	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
+	if containerState != uninitialized {
 		return false, errors.New("container is already initialized: can't register new bean")
 	}
 	overwritten = isBeanRegistered(beanID)
@@ -201,7 +237,7 @@ func RegisterBeanInstance(beanID string, beanInstance interface{}) (overwritten 
 func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx context.Context) (interface{}, error)) (overwritten bool, err error) {
 	initializeShutdownLock.Lock()
 	defer initializeShutdownLock.Unlock()
-	if atomic.CompareAndSwapInt32(&containerInitialized, 1, 1) {
+	if containerState != uninitialized {
 		return false, errors.New("container is already initialized: can't register new bean factory")
 	}
 	if beanScope != Singleton && beanScope != Prototype && beanScope != Request {
@@ -260,25 +296,9 @@ func getScope(bean reflect.Type) (*Scope, error) {
 	return nil, errors.New("unsupported scope: " + beanScope)
 }
 
-func injectSingletonDependencies() error {
-	for beanID, instance := range singletonInstances {
-		if _, ok := userCreatedInstances[beanID]; ok {
-			continue
-		}
-		if _, ok := beanFactories[beanID]; ok {
-			continue
-		}
-		err := injectDependencies(beanID, instance, make(map[string]bool))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func injectDependencies(beanID string, instance interface{}, chain map[string]bool) error {
+func (c *container) injectDependencies(beanID string, instance interface{}, resolve func(string) (interface{}, error)) error {
 	logrus.WithField("beanID", beanID).Trace("injecting dependencies")
-	instanceType := beans[beanID]
+	instanceType := c.beans[beanID]
 	instanceElement := instanceType.Elem()
 	for i := 0; i < instanceElement.NumField(); i++ {
 		field := instanceElement.Field(i)
@@ -295,7 +315,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 		switch fieldToInject.Kind() {
 		case reflect.Ptr, reflect.Interface:
 			if beanToInject == "" { // injecting by type, gotta find the candidate first
-				candidates := findInjectionCandidates(fieldToInject.Type())
+				candidates := c.findInjectionCandidates(fieldToInject.Type())
 				if len(candidates) < 1 {
 					if optionalDependency {
 						continue
@@ -307,9 +327,9 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 				}
 				beanToInject = candidates[0]
 			}
-			beanToInjectType := beans[beanToInject]
+			beanToInjectType := c.beans[beanToInject]
 			logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-			beanScope, beanFound := scopes[beanToInject]
+			beanScope, beanFound := c.scopes[beanToInject]
 			if !beanFound {
 				if optionalDependency {
 					logrus.Trace("no dependency found, injecting nil since the dependency marked as optional")
@@ -320,7 +340,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			if beanScope == Request {
 				return errors.New(requestScopedBeansCantBeInjected)
 			}
-			instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
+			instanceToInject, err := resolve(beanToInject)
 			if err != nil {
 				return err
 			}
@@ -333,7 +353,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
 				return errors.New(unsupportedDependencyType)
 			}
-			candidates := findInjectionCandidates(fieldToInject.Type().Elem())
+			candidates := c.findInjectionCandidates(fieldToInject.Type().Elem())
 			if len(candidates) < 1 {
 				if !optionalDependency {
 					fieldToInject.Set(reflect.MakeSlice(fieldToInject.Type(), 0, 0))
@@ -342,12 +362,12 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			}
 			fieldToInject.Set(reflect.MakeSlice(fieldToInject.Type(), len(candidates), len(candidates)))
 			for i, beanToInject := range candidates {
-				beanToInjectType := beans[beanToInject]
+				beanToInjectType := c.beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-				if scopes[beanToInject] == Request {
+				if c.scopes[beanToInject] == Request {
 					return errors.New(requestScopedBeansCantBeInjected)
 				}
-				instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
+				instanceToInject, err := resolve(beanToInject)
 				if err != nil {
 					return err
 				}
@@ -357,7 +377,7 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			if fieldToInject.Type().Elem().Kind() != reflect.Ptr && fieldToInject.Type().Elem().Kind() != reflect.Interface {
 				return errors.New(unsupportedDependencyType)
 			}
-			candidates := findInjectionCandidates(fieldToInject.Type().Elem())
+			candidates := c.findInjectionCandidates(fieldToInject.Type().Elem())
 			if len(candidates) < 1 {
 				if !optionalDependency {
 					fieldToInject.Set(reflect.MakeMap(fieldToInject.Type()))
@@ -366,12 +386,12 @@ func injectDependencies(beanID string, instance interface{}, chain map[string]bo
 			}
 			fieldToInject.Set(reflect.MakeMap(fieldToInject.Type()))
 			for _, beanToInject := range candidates {
-				beanToInjectType := beans[beanToInject]
+				beanToInjectType := c.beans[beanToInject]
 				logInjection(beanID, instanceElement, beanToInject, beanToInjectType)
-				if scopes[beanToInject] == Request {
+				if c.scopes[beanToInject] == Request {
 					return errors.New(requestScopedBeansCantBeInjected)
 				}
-				instanceToInject, err := getInstance(context.Background(), beanToInject, chain)
+				instanceToInject, err := resolve(beanToInject)
 				if err != nil {
 					return err
 				}
@@ -402,67 +422,15 @@ func isOptional(field reflect.StructField) (bool, error) {
 	return value, nil
 }
 
-func findInjectionCandidates(fieldToInjectType reflect.Type) []string {
+func (c *container) findInjectionCandidates(fieldToInjectType reflect.Type) []string {
 	var candidates []string
-	for beanID, beanType := range beans {
+	for beanID, beanType := range c.beans {
 		if beanType.AssignableTo(fieldToInjectType) {
 			candidates = append(candidates, beanID)
 		}
 	}
+	sort.Strings(candidates)
 	return candidates
-}
-
-func createSingletonInstances() error {
-	for beanID := range beans {
-		if scopes[beanID] != Singleton {
-			continue
-		}
-		if _, ok := userCreatedInstances[beanID]; ok {
-			continue
-		}
-		instance, err := createInstance(context.Background(), beanID)
-		if err != nil {
-			return err
-		}
-		singletonInstances[beanID] = instance
-		logrus.WithFields(logrus.Fields{
-			"beanID": beanID,
-			"scope":  scopes[beanID],
-		}).Trace("singleton instance created")
-	}
-	for beanID, beanFactory := range beanFactories {
-		if scopes[beanID] != Singleton {
-			continue
-		}
-		beanInstance, err := beanFactory(context.Background())
-		if err != nil {
-			return err
-		}
-		if err := validateFactoryInstance(beanInstance); err != nil {
-			return err
-		}
-		singletonInstances[beanID] = beanInstance
-		logrus.WithFields(logrus.Fields{
-			"beanID": beanID,
-			"scope":  scopes[beanID],
-		}).Trace("singleton instance created")
-	}
-	return nil
-}
-
-func createInstance(ctx context.Context, beanID string) (interface{}, error) {
-	if beanFactory, ok := beanFactories[beanID]; ok {
-		beanInstance, err := beanFactory(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if err := validateFactoryInstance(beanInstance); err != nil {
-			return nil, err
-		}
-		return beanInstance, nil
-	}
-	logrus.WithField("beanID", beanID).Trace("creating instance")
-	return reflect.New(beans[beanID].Elem()).Interface(), nil
 }
 
 func validateFactoryInstance(beanInstance interface{}) error {
@@ -476,49 +444,20 @@ func validateFactoryInstance(beanInstance interface{}) error {
 	return nil
 }
 
-func initializeSingletonInstances() error {
-	for beanID, instance := range singletonInstances {
-		err := initializeInstance(beanID, instance)
-		if err != nil {
-			return err
-		}
-		err = setContext(context.Background(), beanID, instance)
-		if err != nil {
-			return err
-		}
+func (c *container) initializeInstance(ctx context.Context, beanID string, instance interface{}) error {
+	if impl, ok := instance.(ContextAwareBean); ok {
+		impl.SetContext(ctx)
 	}
-	return nil
-}
-
-func initializeInstance(beanID string, instance interface{}) error {
 	if impl, ok := instance.(InitializingBean); ok {
 		logrus.WithField("beanID", beanID).Trace("initializing bean")
 		if err := impl.PostConstruct(); err != nil {
 			return err
 		}
 	}
-	bean := reflect.TypeOf(instance)
-	if postprocessors, ok := beanPostprocessors[bean]; ok {
-		logrus.WithField("beanID", beanID).Trace("postprocessing bean")
-		for _, postprocessor := range postprocessors {
-			if err := postprocessor(instance); err != nil {
-				return err
-			}
+	for _, postprocessor := range c.postprocessors[reflect.TypeOf(instance)] {
+		if err := postprocessor(instance); err != nil {
+			return err
 		}
-	}
-	return nil
-}
-
-func setContext(ctx context.Context, beanID string, instance interface{}) error {
-	contextAwareBean := reflect.TypeOf((*ContextAwareBean)(nil)).Elem()
-	bean := reflect.TypeOf(instance)
-	if bean.Implements(contextAwareBean) {
-		setContextMethod, ok := bean.MethodByName(contextAwareBean.Method(0).Name)
-		if !ok {
-			return errors.New("unexpected behavior: can't find method SetContext() in bean " + bean.String())
-		}
-		logrus.WithField("beanID", beanID).WithField("context", ctx).Trace("setting context to bean")
-		setContextMethod.Func.Call([]reflect.Value{reflect.ValueOf(instance), reflect.ValueOf(ctx)})
 	}
 	return nil
 }
@@ -536,24 +475,28 @@ func GetInstance(beanID string) interface{} {
 // GetInstanceSafe function returns bean instance by its ID. It doesnt panic upon explicit error, but returns the error
 // instead.
 func GetInstanceSafe(beanID string) (interface{}, error) {
-	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
-		return nil, errors.New("container is not initialized: can't lookup instances of beans yet")
+	c, release, err := acquireContainer()
+	if err != nil {
+		return nil, err
 	}
-	if scopes[beanID] == Request {
+	defer release()
+	if c.scopes[beanID] == Request {
 		return nil, errors.New("request-scoped beans can't be retrieved directly from the container: they can only be retrieved from the web-context")
 	}
-	return getInstance(context.Background(), beanID, make(map[string]bool))
+	return c.resolve(context.Background(), beanID)
 }
 
 func getRequestBeanInstance(ctx context.Context, beanID string) interface{} {
-	if atomic.CompareAndSwapInt32(&containerInitialized, 0, 0) {
-		panic("container is not initialized: can't lookup instances of beans yet")
-	}
-	beanInstance, err := getInstance(ctx, beanID, make(map[string]bool))
+	c, release, err := acquireContainer()
 	if err != nil {
 		panic(err)
 	}
-	return beanInstance
+	defer release()
+	instance, err := c.resolve(ctx, beanID)
+	if err != nil {
+		panic(err)
+	}
+	return instance
 }
 
 func isBeanRegistered(beanID string) bool {
@@ -564,39 +507,6 @@ func isBeanRegistered(beanID string) bool {
 		return true
 	}
 	return false
-}
-
-func getInstance(ctx context.Context, beanID string, chain map[string]bool) (interface{}, error) {
-	if !isBeanRegistered(beanID) {
-		return nil, errors.New("bean is not registered: " + beanID)
-	}
-	if scopes[beanID] == Singleton {
-		return singletonInstances[beanID], nil
-	}
-	if _, ok := chain[beanID]; ok {
-		return nil, errors.New("circular dependency detected for bean: " + beanID)
-	}
-	chain[beanID] = true
-	defer delete(chain, beanID)
-	instance, err := createInstance(ctx, beanID)
-	if err != nil {
-		return nil, err
-	}
-	if _, ok := beanFactories[beanID]; !ok {
-		err := injectDependencies(beanID, instance, chain)
-		if err != nil {
-			return nil, err
-		}
-	}
-	err = initializeInstance(beanID, instance)
-	if err != nil {
-		return nil, err
-	}
-	err = setContext(ctx, beanID, instance)
-	if err != nil {
-		return nil, err
-	}
-	return instance, nil
 }
 
 // GetBeanTypes returns a map (copy) of beans registered in the Container, omitting bean factories, because their real
@@ -622,24 +532,36 @@ func GetBeanScopes() map[string]Scope {
 	return beanScopes
 }
 
-// Close destroys the IoC container - executes io.Closer for all beans which implements it.
-// This is responsibility of consumer to call Close method.
-// If io.Closer returns an error it will just log the error and continue to Close other beans.
+// Close stops new lookups, waits for active lookups, and closes singletons in
+// reverse initialization order. Close errors are logged and cleanup continues.
+// Stop application work before calling Close: returned beans can outlive a lookup.
+// Do not call Close from a factory or initialization callback, or wait for Close
+// inside one: shutdown must wait for that callback to finish.
 func Close() {
 	initializeShutdownLock.Lock()
-	defer initializeShutdownLock.Unlock()
-
-	for key, value := range singletonInstances {
-		fnc, ok := value.(io.Closer)
-		if ok {
-			err := fnc.Close()
-			if err != nil {
-				logrus.WithField("beanID", key).Error(err)
-			}
-		}
+	for containerState == initializing || containerState == rollingBack {
+		lifecycleChanged.Wait()
 	}
-
-	resetContainerWithoutLock()
+	if containerState == closing {
+		initializeShutdownLock.Unlock()
+		return
+	}
+	c := runningContainer
+	if c == nil {
+		c = newContainer()
+	}
+	containerState = closing
+	for activeLookups != 0 {
+		lifecycleChanged.Wait()
+	}
+	initializeShutdownLock.Unlock()
+	defer func() {
+		initializeShutdownLock.Lock()
+		resetContainerWithoutLock()
+		lifecycleChanged.Broadcast()
+		initializeShutdownLock.Unlock()
+	}()
+	c.closeSingletons()
 }
 
 func resetContainer() {
@@ -649,7 +571,8 @@ func resetContainer() {
 }
 
 func resetContainerWithoutLock() {
-	containerInitialized = 0
+	containerState = uninitialized
+	runningContainer = nil
 	beans = make(map[string]reflect.Type)
 	beanFactories = make(map[string]func(context.Context) (interface{}, error))
 	scopes = make(map[string]Scope)

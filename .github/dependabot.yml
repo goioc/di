@@ -8,3 +8,10 @@ updates:
   open-pull-requests-limit: 10
   reviewers:
     - "dtitov"
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 10
+  reviewers:
+    - "dtitov"
