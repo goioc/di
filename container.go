@@ -140,7 +140,11 @@ func (c *container) resolve(ctx context.Context, id string) (instance interface{
 			if cancelRequest != nil {
 				cancelRequest()
 			}
-			c.closeNodes(r.created, false, false)
+			if c.scopes[id] != Singleton {
+				c.closeNodes(r.created, false, false)
+			}
+			// Failed singletons and their prototypes belong to startup rollback,
+			// which must close the singleton before its initialized dependencies.
 		}
 	}()
 	n, err := c.build(ctx, id, r, make(map[string]bool))
@@ -315,9 +319,17 @@ func (c *container) finishInitialization() error {
 }
 
 func (c *container) rollback() {
+	var incomplete []*beanNode
+	for _, n := range c.created {
+		if n.state != ready {
+			incomplete = append(incomplete, n)
+		}
+	}
+	// Close failed/unfinished owners first, then reverse actual completion order.
+	// Traversing completed cycle members again can place a dependency first.
 	nodes := append([]*beanNode(nil), c.completed...)
-	nodes = append(nodes, c.created...)
-	c.closeNodes(nodes, true, false)
+	nodes = append(nodes, dependencyOrder(incomplete)...)
+	c.closeOrderedNodes(nodes, true, false)
 }
 
 func (c *container) closeSingletons() {

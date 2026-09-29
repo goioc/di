@@ -186,6 +186,42 @@ func TestCloseReversesInitializationForSingletonCycle(t *testing.T) {
 	require.Equal(t, []string{"b initialized", "a initialized", "a closed", "b closed"}, events)
 }
 
+func TestRollbackClosesFailedCycleOwnerBeforeInitializedDependency(t *testing.T) {
+	defer resetContainer()
+	var events []string
+	failure := errors.New("cycle owner failed")
+	_, err := RegisterBean("a", reflect.TypeOf((*singletonCycleA)(nil)))
+	require.NoError(t, err)
+	_, err = RegisterBean("b", reflect.TypeOf((*singletonCycleB)(nil)))
+	require.NoError(t, err)
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleB)(nil)), func(interface{}) error {
+		events = append(events, "b initialized")
+		return nil
+	}))
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*singletonCycleA)(nil)), func(instance interface{}) error {
+		instance.(*singletonCycleA).events = &events
+		events = append(events, "a failed")
+		return failure
+	}))
+	require.ErrorIs(t, InitializeContainer(), failure)
+	require.Equal(t, []string{"b initialized", "a failed", "a closed", "b closed"}, events)
+}
+
+func TestRollbackClosesFailedSingletonBeforePrototypeDependency(t *testing.T) {
+	defer resetContainer()
+	var events []string
+	_, err := RegisterBeanFactory("dependency", Prototype, func(context.Context) (interface{}, error) {
+		return &orderedDependency{events: &events}, nil
+	})
+	require.NoError(t, err)
+	_, err = RegisterBean("consumer", reflect.TypeOf((*orderedConsumer)(nil)))
+	require.NoError(t, err)
+	failure := errors.New("consumer postprocessor failed")
+	require.NoError(t, RegisterBeanPostprocessor(reflect.TypeOf((*orderedConsumer)(nil)), func(interface{}) error { return failure }))
+	require.ErrorIs(t, InitializeContainer(), failure)
+	require.Equal(t, []string{"dependency initialized", "consumer initialized", "consumer closed", "dependency closed"}, events)
+}
+
 type zeroSizeResource struct{}
 
 var zeroSizeResourceCloses int
