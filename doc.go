@@ -7,4 +7,8 @@
 // Wait for initialization to succeed before serving requests or sharing beans
 // with application goroutines. Use Middleware to obtain request-scoped beans
 // from an HTTP request's context, and Close to release singletons at shutdown.
+//
+// SetLogger configures DI diagnostics with a slog.Logger. By default, DI uses
+// its own text logger writing to stderr at Info level. Detailed dependency and
+// initialization diagnostics are available at Debug level.
 package di

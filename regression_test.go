@@ -3,37 +3,38 @@ package di
 import (
 	"bytes"
 	"context"
-	"io"
+	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strings"
 	"testing"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
 
 // di must log through its own logger instance and never read from or write
-// through the host application's global logrus configuration.
-func TestDiLoggingDoesNotTouchGlobalLogrus(t *testing.T) {
+// through the host application's global logging configuration.
+func TestDiLoggingDoesNotTouchGlobalSlog(t *testing.T) {
 	defer resetContainer()
+	require.NotSame(t, slog.Default(), currentLogger())
 
-	var diOut bytes.Buffer
-	originalOut := logger.Out
-	logger.SetOutput(&diOut)
-	defer logger.SetOutput(originalOut)
-
-	standard := logrus.StandardLogger()
-	originalFormatter := standard.Formatter
-	originalGlobalOut := standard.Out
-	globalUsed := false
-	standard.SetFormatter(&sentinelFormatter{used: &globalUsed})
-	standard.SetOutput(io.Discard)
+	var globalOut, standardOut bytes.Buffer
+	originalDefault := slog.Default()
+	originalOut, originalFlags, originalPrefix := log.Writer(), log.Flags(), log.Prefix()
+	hostHandler := slog.NewTextHandler(&globalOut, &slog.HandlerOptions{Level: slog.LevelError})
+	hostLogger := slog.New(hostHandler)
 	defer func() {
-		standard.SetFormatter(originalFormatter)
-		standard.SetOutput(originalGlobalOut)
+		slog.SetDefault(originalDefault)
+		log.SetOutput(originalOut)
+		log.SetFlags(originalFlags)
+		log.SetPrefix(originalPrefix)
 	}()
+	slog.SetDefault(hostLogger)
+	log.SetOutput(&standardOut)
+	log.SetFlags(log.Lshortfile)
+	log.SetPrefix("host: ")
+	diOut := captureDiLogs(t, nil)
 
 	// Trigger a di warning: registering the same ID twice.
 	_, err := RegisterBeanInstance("duplicate", new(string))
@@ -41,21 +42,17 @@ func TestDiLoggingDoesNotTouchGlobalLogrus(t *testing.T) {
 	_, err = RegisterBeanInstance("duplicate", new(string))
 	require.NoError(t, err)
 
-	if globalUsed {
-		t.Error("di wrote through the global logrus; it must use its own logger instance")
-	}
-	if !strings.Contains(diOut.String(), beanAlreadyRegistered) {
-		t.Errorf("di's duplicate-registration warning missing from its own logger output: %q", diOut.String())
-	}
-}
-
-type sentinelFormatter struct {
-	used *bool
-}
-
-func (f *sentinelFormatter) Format(*logrus.Entry) ([]byte, error) {
-	*f.used = true
-	return nil, nil
+	require.Empty(t, globalOut.String())
+	require.Empty(t, standardOut.String())
+	require.Same(t, hostLogger, slog.Default())
+	require.Same(t, hostHandler, hostLogger.Handler())
+	require.False(t, hostLogger.Enabled(t.Context(), slog.LevelWarn))
+	require.True(t, hostLogger.Enabled(t.Context(), slog.LevelError))
+	require.Same(t, &standardOut, log.Writer())
+	require.Equal(t, log.Lshortfile, log.Flags())
+	require.Equal(t, "host: ", log.Prefix())
+	require.Contains(t, diOut.String(), beanAlreadyRegistered)
+	require.Contains(t, diOut.String(), "level=WARN")
 }
 
 type ctxProbe struct {
@@ -132,10 +129,7 @@ func (b *calmCloser) Close() error {
 func TestPanicInCloserDoesNotAbortShutdown(t *testing.T) {
 	defer resetContainer()
 
-	var logBuf bytes.Buffer
-	originalOut := logger.Out
-	logger.SetOutput(&logBuf)
-	defer logger.SetOutput(originalOut)
+	logBuf := captureDiLogs(t, nil)
 
 	panicked, otherClosed := false, false
 	_, err := RegisterBeanInstance("panicky", &panicCloser{closed: &panicked})
@@ -147,19 +141,20 @@ func TestPanicInCloserDoesNotAbortShutdown(t *testing.T) {
 	require.NotPanics(t, func() { Close() })
 	require.True(t, panicked, "the panicking bean must still be closed")
 	require.True(t, otherClosed, "beans after the panicking one must still be closed")
-	require.Contains(t, logBuf.String(), "panic while closing bean")
+	require.Contains(t, logBuf.String(), "panic while closing bean: closer exploded")
+	require.Contains(t, logBuf.String(), "level=ERROR")
+	require.Contains(t, logBuf.String(), "beanID=panicky")
 }
 
 func TestNilPanicInCloserIsLogged(t *testing.T) {
 	defer resetContainer()
 
-	var logBuf bytes.Buffer
-	originalOut := logger.Out
-	logger.SetOutput(&logBuf)
-	defer logger.SetOutput(originalOut)
+	logBuf := captureDiLogs(t, nil)
 
 	_, err := RegisterBeanInstance("nil-panicky", &nilPanicCloser{})
 	require.NoError(t, err)
 	require.NotPanics(t, func() { Close() })
 	require.Contains(t, logBuf.String(), "panic while closing bean")
+	require.Contains(t, logBuf.String(), "level=ERROR")
+	require.Contains(t, logBuf.String(), "beanID=nil-panicky")
 }

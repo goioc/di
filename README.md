@@ -309,6 +309,30 @@ not wait for those closers or cancel the caller's original request context.
 Request construction and initialization errors panic in the handler goroutine;
 place recovery middleware outside `di.Middleware` if you want to handle them.
 
+## Logging
+
+DI uses its own `log/slog` text logger, writing to stderr at Info level by
+default. Duplicate registrations produce warnings, cleanup failures produce
+errors, and dependency injection and initialization diagnostics use Debug.
+
+Use `di.SetLogger` to supply a logger with your preferred handler, level,
+destination, and attributes. For example, with `log/slog` and `os` imported:
+
+```go
+di.SetLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	Level: slog.LevelDebug,
+})).With("component", "di"))
+```
+
+To use your application's configured default logger, call
+`di.SetLogger(slog.Default())`. To silence DI diagnostics, use
+`di.SetLogger(slog.New(slog.DiscardHandler))`.
+
+`di.SetLogger(nil)` restores the default stderr logger. Logger configuration
+persists across `di.Close()`. You can change the logger concurrently with DI
+operations; log calls already in progress may finish through the previous
+logger. Setting the DI logger does not change the application's global logger.
+
 ## Development
 
 ```sh
