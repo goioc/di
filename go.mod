@@ -1,4 +1,4 @@
-module github.com/goioc/di
+module github.com/goioc/di/v2
 
 go 1.26.4
 
