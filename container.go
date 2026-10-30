@@ -3,6 +3,7 @@ package di
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"slices"
@@ -473,11 +474,11 @@ func closeBean(id string, instance any) {
 		defer func() {
 			if !closed {
 				p := recover()
-				logger.WithField("beanID", id).Errorf("panic while closing bean: %v", p)
+				currentLogger().Error(fmt.Sprintf("panic while closing bean: %v", p), "beanID", id)
 			}
 		}()
 		if err := closer.Close(); err != nil {
-			logger.WithField("beanID", id).Error(err)
+			currentLogger().Error(err.Error(), "beanID", id)
 		}
 		closed = true
 	}

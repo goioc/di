@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"sync"
 	"unsafe"
-
-	"github.com/sirupsen/logrus"
 )
 
 // Scope determines when a bean is created and who manages its lifetime.
@@ -73,10 +71,6 @@ type ContextAwareBean interface {
 	// SetContext supplies the bean's context before its initialization callbacks.
 	SetContext(ctx context.Context)
 }
-
-// logger is the package's own logger instance so that importing di never
-// mutates the host application's global logrus configuration.
-var logger = logrus.New()
 
 // RegisterBeanPostprocessor appends a callback for an exact runtime bean type.
 // Callbacks run in registration order after PostConstruct, including for supplied
@@ -185,11 +179,10 @@ func RegisterBean(beanID string, beanType reflect.Type) (overwritten bool, err e
 	}
 	var existingBeanType reflect.Type
 	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
-		logger.WithFields(logrus.Fields{
-			"id":              beanID,
-			"registered bean": existingBeanType,
-			"new bean":        beanType,
-		}).Warn(beanAlreadyRegistered)
+		currentLogger().Warn(beanAlreadyRegistered,
+			"id", beanID,
+			"registered bean", existingBeanType.String(),
+			"new bean", beanType.String())
 	}
 	beanScope, err := getScope(beanType)
 	if err != nil {
@@ -234,11 +227,10 @@ func RegisterBeanInstance(beanID string, beanInstance any) (overwritten bool, er
 	}
 	var existingBeanType reflect.Type
 	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
-		logger.WithFields(logrus.Fields{
-			"id":                beanID,
-			"registered bean":   existingBeanType,
-			"new bean instance": beanType,
-		}).Warn(beanAlreadyRegistered)
+		currentLogger().Warn(beanAlreadyRegistered,
+			"id", beanID,
+			"registered bean", existingBeanType.String(),
+			"new bean instance", beanType.String())
 	}
 	clearBeanRegistration(beanID)
 	beans[beanID] = beanType
@@ -273,10 +265,9 @@ func RegisterBeanFactory(beanID string, beanScope Scope, beanFactory func(ctx co
 	overwritten = isBeanRegistered(beanID)
 	var existingBeanType reflect.Type
 	if existingBeanType, _ = beans[beanID]; existingBeanType != nil {
-		logger.WithFields(logrus.Fields{
-			"id":              beanID,
-			"registered bean": existingBeanType,
-		}).Warn(beanAlreadyRegistered)
+		currentLogger().Warn(beanAlreadyRegistered,
+			"id", beanID,
+			"registered bean", existingBeanType.String())
 	}
 	clearBeanRegistration(beanID)
 	scopes[beanID] = beanScope
@@ -314,7 +305,7 @@ func getScope(bean reflect.Type) (*Scope, error) {
 // injectDependencies fills tagged fields, including unexported ones, using the
 // current resolution's resolver so construction tracks dependency ownership.
 func (c *container) injectDependencies(beanID string, instance any, resolve func(string) (any, error)) error {
-	logger.WithField("beanID", beanID).Trace("injecting dependencies")
+	currentLogger().Debug("injecting dependencies", "beanID", beanID)
 	instanceElement := c.beans[beanID].Elem()
 	for i := range instanceElement.NumField() {
 		field := instanceElement.Field(i)
@@ -418,12 +409,15 @@ func (c *container) dependencyValue(beanID, dependency string, optionalDependenc
 }
 
 func logInjection(beanID string, instanceElement reflect.Type, beanToInject string, beanToInjectType reflect.Type) {
-	logger.WithFields(logrus.Fields{
-		"bean":               beanID,
-		"beanType":           instanceElement,
-		"dependencyBean":     beanToInject,
-		"dependencyBeanType": beanToInjectType,
-	}).Trace("processing dependency")
+	dependencyType := "<nil>"
+	if beanToInjectType != nil {
+		dependencyType = beanToInjectType.String()
+	}
+	currentLogger().Debug("processing dependency",
+		"bean", beanID,
+		"beanType", instanceElement.String(),
+		"dependencyBean", beanToInject,
+		"dependencyBeanType", dependencyType)
 }
 
 func isOptional(field reflect.StructField) (bool, error) {
@@ -464,7 +458,7 @@ func (c *container) initializeInstance(ctx context.Context, beanID string, insta
 		impl.SetContext(ctx)
 	}
 	if impl, ok := instance.(InitializingBean); ok {
-		logger.WithField("beanID", beanID).Trace("initializing bean")
+		currentLogger().Debug("initializing bean", "beanID", beanID)
 		if err := impl.PostConstruct(); err != nil {
 			return err
 		}
