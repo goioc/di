@@ -2,7 +2,7 @@
 [![goioc](https://habrastorage.org/webt/ym/pu/dc/ympudccm7j7a3qex_jjroxgsiwg.png)](https://github.com/goioc)
 
 [![Go](https://github.com/goioc/di/workflows/Go/badge.svg)](https://github.com/goioc/di/actions)
-[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/goioc/di/?tab=doc)
+[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/goioc/di/v2/?tab=doc)
 [![codecov](https://codecov.io/gh/goioc/di/branch/master/graph/badge.svg)](https://codecov.io/gh/goioc/di)
 [![Awesome](https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg)](https://github.com/sindresorhus/awesome)
 
@@ -18,8 +18,11 @@ singleton, prototype, and HTTP request scopes.
 Requires Go 1.26.4 or later.
 
 ```sh
-go get github.com/goioc/di
+go get github.com/goioc/di/v2
 ```
+
+Version 2 uses the `github.com/goioc/di/v2` import path. When upgrading from v1,
+update your imports to include `/v2`.
 
 ## Quick start
 
@@ -34,7 +37,7 @@ import (
 	"log"
 	"reflect"
 
-	"github.com/goioc/di"
+	"github.com/goioc/di/v2"
 )
 
 type Config struct {
@@ -271,7 +274,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/goioc/di"
+	"github.com/goioc/di/v2"
 )
 
 type RequestInfo struct {
@@ -341,5 +344,5 @@ go vet ./...
 ```
 
 See the [tests](di_test.go) for more injection examples and the
-[API reference](https://pkg.go.dev/github.com/goioc/di) for function documentation.
+[API reference](https://pkg.go.dev/github.com/goioc/di/v2) for function documentation.
 Licensed under the [MIT License](LICENSE).
